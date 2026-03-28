@@ -84,6 +84,11 @@ class PB_PT_main_panel(bpy.types.Panel):
         box.prop(s, "vertical_fins")
         box.prop(s, "entrance_style")
         box.prop(s, "roof_style")
+        box.prop(s, "roof_profile")
+        box.prop(s, "roof_detail_density")
+        box.prop(s, "rooftop_equipment_amount")
+        box.prop(s, "skylight_chance")
+        box.prop(s, "solar_panel_chance")
 
         box = layout.box()
         box.label(text="Floor Profiles", icon='SORTSIZE')

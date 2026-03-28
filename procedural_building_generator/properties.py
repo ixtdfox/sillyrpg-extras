@@ -34,6 +34,20 @@ class PBSettings(bpy.types.PropertyGroup):
     band_density: FloatProperty(name="Band Density", default=0.5, min=0.0, max=1.0)
     vertical_fins: FloatProperty(name="Vertical Fins", default=0.45, min=0.0, max=1.0)
     roof_style: IntProperty(name="Roof Style", default=1, min=0, max=2)
+    roof_profile: EnumProperty(
+        name="Roof Profile",
+        items=(
+            ("FLAT", "Flat", "Plain flat roof profile"),
+            ("RAISED_PARAPET", "Raised Parapet", "Flat roof with taller parapet silhouette"),
+            ("STEPPED_PARAPET", "Stepped Parapet", "Parapet with stepped edge accents"),
+            ("ACCESS_VOLUME", "Access Volume", "Partial rooftop access volume"),
+        ),
+        default="RAISED_PARAPET",
+    )
+    roof_detail_density: FloatProperty(name="Roof Detail Density", default=0.55, min=0.0, max=1.0)
+    rooftop_equipment_amount: IntProperty(name="Rooftop Equipment", default=5, min=0, max=24)
+    skylight_chance: FloatProperty(name="Skylight Chance", default=0.35, min=0.0, max=1.0)
+    solar_panel_chance: FloatProperty(name="Solar Panel Chance", default=0.45, min=0.0, max=1.0)
     tile_size: FloatProperty(name="Tile Size", default=2.0, min=1.0)
     floor_height: FloatProperty(name="Floor Height", default=2.8, min=2.2)
     wall_thickness: FloatProperty(name="Wall Thickness", default=0.18, min=0.05)
