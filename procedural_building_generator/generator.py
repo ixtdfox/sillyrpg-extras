@@ -16,6 +16,9 @@ from .utils import (
 
 
 class BuildingGenerator:
+    _cached_shape = None
+    _cached_shape_sig = None
+
     def __init__(self):
         self.col = ensure_collection(COLLECTION_NAME)
         self.mats = ensure_materials()
@@ -32,7 +35,26 @@ class BuildingGenerator:
     def clear(self):
         clear_generated_objects(self.col)
 
-    def build(self, quality="full"):
+    @staticmethod
+    def shape_signature(settings, fast_mode):
+        return (
+            round(settings.width_m, 4), round(settings.depth_m, 4),
+            int(settings.floors), int(settings.room_count), int(settings.seed),
+            round(settings.tile_size, 4), round(settings.floor_height, 4),
+            round(settings.slab_thickness, 4), round(settings.stairs_width, 4),
+            round(settings.stair_opening_margin, 4), bool(fast_mode),
+        )
+
+    def resolve_shape(self, settings, rebuild_shape):
+        sig = self.shape_signature(settings, self.fast_mode)
+        if rebuild_shape or BuildingGenerator._cached_shape is None or BuildingGenerator._cached_shape_sig != sig:
+            shape = BuildingShape.from_settings(settings, self.fast_mode)
+            BuildingGenerator._cached_shape = shape
+            BuildingGenerator._cached_shape_sig = sig
+            return shape
+        return BuildingGenerator._cached_shape
+
+    def build(self, quality="full", rebuild_shape=True):
         settings, root, handle = self.get_state()
         self.fast_mode = (quality == "preview")
         self.detail_scale = settings.preview_detail_scale if self.fast_mode else 1.0
@@ -44,7 +66,7 @@ class BuildingGenerator:
 
         self.clear()
 
-        shape = BuildingShape.from_settings(settings, self.fast_mode)
+        shape = self.resolve_shape(settings, rebuild_shape)
         style = BuildingStyle.from_settings(settings, self.fast_mode)
         assembler = BuildingAssembler(self.batch)
         assembler.assemble(settings, shape, style, root)

@@ -4,7 +4,7 @@ import math
 import random
 from dataclasses import dataclass
 
-from .building_style import FloorProfile
+from .building_style import FloorLevel
 
 
 @dataclass(frozen=True)
@@ -28,7 +28,7 @@ class BuildingShape:
     stair_opening: tuple[float, float, float, float]
     rooms: list[RectCell]
     doors: list[tuple[str, float, float]]
-    floor_profiles: list[FloorProfile]
+    floor_profiles: list[FloorLevel]
 
     @classmethod
     def from_settings(cls, settings, fast_mode: bool) -> "BuildingShape":
@@ -53,7 +53,7 @@ class BuildingShape:
         rooms = split_rectangles(width, depth, room_count, tile, settings.seed)
         doors = choose_connected_doors(rooms, settings.seed)
         floor_profiles = [
-            FloorProfile(
+            FloorLevel(
                 floor_index=i,
                 z_floor=i * float(settings.floor_height),
                 is_ground=(i == 0),

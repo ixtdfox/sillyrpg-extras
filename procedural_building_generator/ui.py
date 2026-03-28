@@ -29,6 +29,7 @@ class PB_PT_main_panel(bpy.types.Panel):
 
         box = layout.box()
         box.label(text="Style")
+        box.prop(s, "style_preset")
         box.prop(s, "detail_amount")
         box.prop(s, "balcony_chance")
         box.prop(s, "roof_style")

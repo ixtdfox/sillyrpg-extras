@@ -18,7 +18,8 @@ from .generator import BuildingGenerator
 from .utils import GENERATOR_TAG, HANDLE_NAME, ROOT_NAME
 
 _LAST_CONTROLLER_SIG = None
-_LAST_PROPS_SIG = None
+_LAST_SHAPE_SIG = None
+_LAST_STYLE_SIG = None
 _LAST_CHANGE_TS = 0.0
 _LAST_REBUILD_TS = 0.0
 _LAST_QUALITY = None
@@ -36,13 +37,12 @@ def read_controller_sig():
     )
 
 
-def read_props_sig():
+def read_shape_sig():
     s = bpy.context.scene.pb_settings
     return (
         round(s.width_m, 4), round(s.depth_m, 4),
         s.floors, s.room_count, s.seed,
-        round(s.detail_amount, 4), round(s.balcony_chance, 4),
-        s.roof_style, round(s.tile_size, 4), round(s.floor_height, 4),
+        round(s.tile_size, 4), round(s.floor_height, 4),
         round(s.wall_thickness, 4), round(s.slab_thickness, 4),
         round(s.window_sill_h, 4), round(s.window_head_h, 4),
         round(s.door_width, 4), round(s.door_height, 4),
@@ -51,8 +51,22 @@ def read_props_sig():
         round(s.lot_padding, 4),
         round(s.parapet_height, 4), round(s.parapet_thickness, 4),
         round(s.canopy_depth, 4), round(s.canopy_width, 4), round(s.canopy_height, 4),
-        int(s.interactive_preview), round(s.preview_detail_scale, 4),
-        s.rebuild_interval_ms, s.idle_full_rebuild_ms, int(s.auto_rebuild),
+    )
+
+
+def read_style_sig():
+    s = bpy.context.scene.pb_settings
+    return (
+        s.seed,
+        round(s.detail_amount, 4),
+        round(s.balcony_chance, 4),
+        s.roof_style,
+        s.style_preset,
+        int(s.interactive_preview),
+        round(s.preview_detail_scale, 4),
+        s.rebuild_interval_ms,
+        s.idle_full_rebuild_ms,
+        int(s.auto_rebuild),
     )
 
 
@@ -75,14 +89,15 @@ def timer_should_pause():
 
 
 def proc_building_timer():
-    global _LAST_CONTROLLER_SIG, _LAST_PROPS_SIG, _LAST_CHANGE_TS, _LAST_REBUILD_TS, _LAST_QUALITY
+    global _LAST_CONTROLLER_SIG, _LAST_SHAPE_SIG, _LAST_STYLE_SIG, _LAST_CHANGE_TS, _LAST_REBUILD_TS, _LAST_QUALITY
 
     scene = bpy.context.scene
     if not hasattr(scene, "pb_settings"):
         return 0.25
 
     controller_sig = read_controller_sig()
-    props_sig = read_props_sig()
+    shape_sig = read_shape_sig()
+    style_sig = read_style_sig()
     if controller_sig is None:
         return 0.25
 
@@ -90,11 +105,13 @@ def proc_building_timer():
     s = scene.pb_settings
 
     controller_changed = controller_sig != _LAST_CONTROLLER_SIG
-    props_changed = props_sig != _LAST_PROPS_SIG
+    shape_changed = shape_sig != _LAST_SHAPE_SIG
+    style_changed = style_sig != _LAST_STYLE_SIG
 
-    if controller_changed or props_changed:
+    if controller_changed or shape_changed or style_changed:
         _LAST_CONTROLLER_SIG = controller_sig
-        _LAST_PROPS_SIG = props_sig
+        _LAST_SHAPE_SIG = shape_sig
+        _LAST_STYLE_SIG = style_sig
         _LAST_CHANGE_TS = now
 
     if timer_should_pause():
@@ -110,9 +127,12 @@ def proc_building_timer():
         quality = "preview"
 
     if time_since_rebuild_ms >= s.rebuild_interval_ms:
-        if (controller_changed or props_changed) or (quality != _LAST_QUALITY and time_since_change_ms >= s.rebuild_interval_ms):
+        quality_changed = quality != _LAST_QUALITY
+        should_rebuild = controller_changed or shape_changed or style_changed or (quality_changed and time_since_change_ms >= s.rebuild_interval_ms)
+        if should_rebuild:
             try:
-                BuildingGenerator().build(quality)
+                style_only_change = style_changed and not (controller_changed or shape_changed or quality_changed)
+                BuildingGenerator().build(quality, rebuild_shape=not style_only_change)
                 _LAST_REBUILD_TS = now
                 _LAST_QUALITY = quality
             except Exception as e:
