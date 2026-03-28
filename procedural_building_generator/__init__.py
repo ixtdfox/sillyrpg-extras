@@ -82,15 +82,19 @@ def active_generated_object_selected():
     return bool(obj.get("generated_by") == GENERATOR_TAG)
 
 
-def timer_should_pause():
+def timer_pause_reason():
     ctx = bpy.context
     if ctx.mode != 'OBJECT':
-        return True
+        return "non-object mode"
     if active_generated_object_selected():
-        return True
+        return "generated object selected"
     if not ctx.scene.pb_settings.auto_rebuild:
-        return True
-    return False
+        return "auto rebuild paused"
+    return ""
+
+
+def timer_should_pause():
+    return bool(timer_pause_reason())
 
 
 def proc_building_timer():
@@ -119,7 +123,9 @@ def proc_building_timer():
         _LAST_STYLE_SIG = style_sig
         _LAST_CHANGE_TS = now
 
-    if timer_should_pause():
+    pause_reason = timer_pause_reason()
+    s.pb_timer_pause_reason = pause_reason or "running"
+    if pause_reason:
         return 0.12
 
     time_since_change_ms = (now - _LAST_CHANGE_TS) * 1000.0
@@ -140,6 +146,7 @@ def proc_building_timer():
                 BuildingGenerator().build(quality, rebuild_shape=not style_only_change)
                 _LAST_REBUILD_TS = now
                 _LAST_QUALITY = quality
+                s.pb_last_rebuild_quality = quality
             except Exception as e:
                 print("Proc building rebuild failed:", e)
 

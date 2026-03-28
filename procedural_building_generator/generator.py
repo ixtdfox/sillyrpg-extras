@@ -59,6 +59,7 @@ class BuildingGenerator:
 
     def build(self, quality="full", rebuild_shape=True):
         settings, root, handle = self.get_state()
+        settings.pb_last_rebuild_quality = quality
         self.fast_mode = (quality == "preview")
         self.detail_scale = settings.preview_detail_scale if self.fast_mode else 1.0
         self.batch = MeshBatcher()
