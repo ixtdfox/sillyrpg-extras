@@ -12,6 +12,8 @@ from .utils import GENERATOR_TAG
 
 
 class BuildingAssembler:
+    WINDOW_OVERLAP = 0.015
+
     def __init__(self, batch: MeshBatcher, generated_collection, asset_helper_collection, asset_instance_collection):
         self.batch = batch
         self.generated_collection = generated_collection
@@ -219,25 +221,79 @@ class BuildingAssembler:
             if self._add_roof_box_if_valid(shape, root, rect, roof_z + 0.01, util_h, "wall", blocked_rects):
                 blocked_rects.append(rect)
 
-    def add_window_parts(self, settings, wx, wy, z_floor, axis, outward_sign, root):
-        sill = settings.window_sill_h
-        head = settings.window_head_h
-        tile = settings.tile_size
-        glass_major = tile * 0.76
-        side = (tile - glass_major) * 0.5
-        zc = root.location.z + z_floor + sill + (head - sill) * 0.5
+    def _window_layout(self, settings, tile_width: float, sill_offset: float = 0.0, head_offset: float = 0.0):
+        floor_h = float(settings.floor_height)
+        clearance = float(getattr(settings, "minimum_window_clearance", 0.5))
+        overlap = float(getattr(settings, "window_overlap", self.WINDOW_OVERLAP))
+        overlap = max(0.01, min(0.02, overlap))
+        max_sill = max(0.0, floor_h - 0.8)
+        max_head = max(0.0, floor_h - 0.1)
+        sill = max(0.0, min(max_sill, float(settings.window_sill_h) + sill_offset))
+        head = max(0.0, min(max_head, float(settings.window_head_h) + head_offset))
+        if head <= sill + clearance:
+            return None
+
+        min_trim = max(0.08, tile_width * 0.09)
+        trim_nominal = max(min_trim, tile_width * 0.12)
+        max_trim = max(min_trim, (tile_width - 0.12) * 0.5)
+        trim_nominal = min(trim_nominal, max_trim)
+        glass_nominal = tile_width - trim_nominal * 2.0
+        if glass_nominal <= 0.1:
+            return None
+
+        return {
+            "tile": tile_width,
+            "sill": sill,
+            "head": head,
+            "clearance": clearance,
+            "overlap": overlap,
+            "trim_nominal": trim_nominal,
+            "glass_nominal": glass_nominal,
+            "window_h": head - sill,
+            "lower_h": sill,
+            "upper_h": floor_h - head,
+        }
+
+    def add_window_parts(self, settings, wx, wy, z_floor, axis, outward_sign, root, layout):
+        tile = layout["tile"]
+        overlap = layout["overlap"]
+        lower_a, lower_b = 0.0, layout["sill"] + overlap
+        win_a, win_b = layout["sill"] - overlap, layout["head"] + overlap
+        upper_a, upper_b = layout["head"] - overlap, float(settings.floor_height)
+        lower_h = max(0.01, lower_b - lower_a)
+        win_h = max(0.01, win_b - win_a)
+        upper_h = max(0.01, upper_b - upper_a)
+
+        trim_nominal = layout["trim_nominal"]
+        glass_nominal = layout["glass_nominal"]
+
+        left_a = -tile * 0.5
+        left_b = -tile * 0.5 + trim_nominal + overlap
+        glass_a = -tile * 0.5 + trim_nominal - overlap
+        glass_b = tile * 0.5 - trim_nominal + overlap
+        right_a = tile * 0.5 - trim_nominal - overlap
+        right_b = tile * 0.5
+
+        left_w = max(0.01, left_b - left_a)
+        right_w = max(0.01, right_b - right_a)
+        glass_w = max(0.01, glass_b - glass_a)
+
+        z_base = root.location.z + z_floor
+        z_lower = z_base + (lower_a + lower_b) * 0.5
+        z_window = z_base + (win_a + win_b) * 0.5
+        z_upper = z_base + (upper_a + upper_b) * 0.5
         if axis == "x":
-            self.add_box("wall", tile, settings.wall_thickness, sill, (wx, wy, root.location.z + z_floor + sill * 0.5))
-            self.add_box("trim", tile, settings.wall_thickness, settings.floor_height - head, (wx, wy, root.location.z + z_floor + head + (settings.floor_height - head) * 0.5))
-            self.add_box("trim", side, settings.wall_thickness, head - sill, (wx - glass_major * 0.5 - side * 0.5, wy, zc))
-            self.add_box("trim", side, settings.wall_thickness, head - sill, (wx + glass_major * 0.5 + side * 0.5, wy, zc))
-            self.add_box("glass", glass_major, settings.wall_thickness * 0.35, head - sill, (wx, wy + outward_sign * settings.wall_thickness * 0.25, zc))
+            self.add_box("wall", tile, settings.wall_thickness, lower_h, (wx, wy, z_lower))
+            self.add_box("trim", tile, settings.wall_thickness, upper_h, (wx, wy, z_upper))
+            self.add_box("trim", left_w, settings.wall_thickness, win_h, (wx + (left_a + left_b) * 0.5, wy, z_window))
+            self.add_box("trim", right_w, settings.wall_thickness, win_h, (wx + (right_a + right_b) * 0.5, wy, z_window))
+            self.add_box("glass", glass_w, settings.wall_thickness * 0.35, win_h, (wx + (glass_a + glass_b) * 0.5, wy + outward_sign * settings.wall_thickness * 0.25, z_window))
         else:
-            self.add_box("wall", settings.wall_thickness, tile, sill, (wx, wy, root.location.z + z_floor + sill * 0.5))
-            self.add_box("trim", settings.wall_thickness, tile, settings.floor_height - head, (wx, wy, root.location.z + z_floor + head + (settings.floor_height - head) * 0.5))
-            self.add_box("trim", settings.wall_thickness, side, head - sill, (wx, wy - glass_major * 0.5 - side * 0.5, zc))
-            self.add_box("trim", settings.wall_thickness, side, head - sill, (wx, wy + glass_major * 0.5 + side * 0.5, zc))
-            self.add_box("glass", settings.wall_thickness * 0.35, glass_major, head - sill, (wx + outward_sign * settings.wall_thickness * 0.25, wy, zc))
+            self.add_box("wall", settings.wall_thickness, tile, lower_h, (wx, wy, z_lower))
+            self.add_box("trim", settings.wall_thickness, tile, upper_h, (wx, wy, z_upper))
+            self.add_box("trim", settings.wall_thickness, left_w, win_h, (wx, wy + (left_a + left_b) * 0.5, z_window))
+            self.add_box("trim", settings.wall_thickness, right_w, win_h, (wx, wy + (right_a + right_b) * 0.5, z_window))
+            self.add_box("glass", settings.wall_thickness * 0.35, glass_w, win_h, (wx + outward_sign * settings.wall_thickness * 0.25, wy + (glass_a + glass_b) * 0.5, z_window))
 
     def build_outer_walls(self, settings, shape, style, root, floor_profile):
         z_floor = floor_profile.z_floor
@@ -320,35 +376,37 @@ class BuildingAssembler:
             return
 
         if module_id == "NarrowWindowBayModule":
-            self._build_window_variant(settings, root, z_floor, face, wx, wy, width_factor=0.58, sill_offset=0.08)
+            if not self._build_window_variant(settings, root, z_floor, face, wx, wy, width_factor=0.58, sill_offset=0.08):
+                self._build_full_wall(face, settings, tile, wx, wy, root.location.z + z_floor)
             return
 
         if module_id == "WideWindowBayModule":
-            self._build_window_variant(settings, root, z_floor, face, wx, wy, width_factor=0.92, sill_offset=-0.03)
+            if not self._build_window_variant(settings, root, z_floor, face, wx, wy, width_factor=0.92, sill_offset=-0.03):
+                self._build_full_wall(face, settings, tile, wx, wy, root.location.z + z_floor)
             return
 
-        outward = {
-            "front": +1,
-            "back": -1,
-            "left": -1,
-            "right": +1,
-        }[face]
-        axis = "x" if face in {"front", "back"} else "y"
-        self.add_window_parts(settings, wx, wy, z_floor, axis, outward, root)
+        if module_id in {"StandardWindowModule", "StairWindowModule", "BalconyModule"}:
+            if not self._build_window_variant(settings, root, z_floor, face, wx, wy, width_factor=1.0, sill_offset=0.0):
+                self._build_full_wall(face, settings, tile, wx, wy, root.location.z + z_floor)
+                return
 
-        if module_id == "BalconyModule" and face in {"front", "back"}:
-            self._build_balcony_variant(settings, style, root, z_floor, face, wx, wy, tile)
+            if module_id == "BalconyModule" and face in {"front", "back"}:
+                self._build_balcony_variant(settings, style, root, z_floor, face, wx, wy, tile)
+            return
+
+        self._build_full_wall(face, settings, tile, wx, wy, root.location.z + z_floor)
 
     def _build_window_variant(self, settings, root, z_floor, face, wx, wy, width_factor: float, sill_offset: float):
-        local = type("VariantSettings", (), {})()
-        for key in ("window_sill_h", "window_head_h", "tile_size", "wall_thickness", "floor_height"):
-            setattr(local, key, getattr(settings, key))
-        local.window_sill_h = max(0.2, settings.window_sill_h + sill_offset)
-        local.window_head_h = min(settings.floor_height - 0.1, settings.window_head_h + sill_offset * 0.5)
-        local.tile_size = settings.tile_size * max(0.45, min(1.0, width_factor))
+        if not getattr(settings, "window_is_valid", True):
+            return False
+        tile = settings.tile_size * max(0.45, min(1.0, width_factor))
+        layout = self._window_layout(settings, tile_width=tile, sill_offset=sill_offset, head_offset=sill_offset * 0.5)
+        if layout is None:
+            return False
         axis = "x" if face in {"front", "back"} else "y"
         outward = {"front": +1, "back": -1, "left": -1, "right": +1}[face]
-        self.add_window_parts(local, wx, wy, z_floor, axis, outward, root)
+        self.add_window_parts(settings, wx, wy, z_floor, axis, outward, root, layout)
+        return True
 
     def _build_full_wall(self, face, settings, tile, wx, wy, z_floor_world):
         if face in {"front", "back"}:

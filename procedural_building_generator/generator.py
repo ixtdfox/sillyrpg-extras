@@ -4,6 +4,7 @@ from .batching import MeshBatcher
 from .building_assembler import BuildingAssembler
 from .building_shape import BuildingShape
 from .building_style import BuildingStyle
+from .parameter_validation import sanitize_parameters
 from .utils import (
     ASSET_HELPER_COLLECTION_NAME,
     ASSET_INSTANCES_COLLECTION_NAME,
@@ -67,17 +68,18 @@ class BuildingGenerator:
         self.fast_mode = (quality == "preview")
         self.detail_scale = settings.preview_detail_scale if self.fast_mode else 1.0
         self.batch = MeshBatcher()
+        safe_settings = sanitize_parameters(settings, self.fast_mode)
 
-        handle.location.x = root.location.x + settings.width_m
-        handle.location.y = root.location.y + settings.depth_m
+        handle.location.x = root.location.x + safe_settings.width_m
+        handle.location.y = root.location.y + safe_settings.depth_m
         handle.location.z = root.location.z
 
         self.clear()
 
-        shape = self.resolve_shape(settings, rebuild_shape)
-        style = BuildingStyle.from_settings(settings, self.fast_mode)
+        shape = self.resolve_shape(safe_settings, rebuild_shape)
+        style = BuildingStyle.from_settings(safe_settings, self.fast_mode)
         apply_style_material_tuning(self.mats, style)
         assembler = BuildingAssembler(self.batch, self.col, self.asset_helper_col, self.asset_instance_col)
-        assembler.assemble(settings, shape, style, root)
+        assembler.assemble(safe_settings, shape, style, root)
 
         self.batch.build_objects(self.col, self.mats, smooth=not self.fast_mode)

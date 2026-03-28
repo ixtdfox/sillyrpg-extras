@@ -36,7 +36,7 @@ class BuildingShape:
         width = float(settings.width_m)
         depth = float(settings.depth_m)
         floors = max(1, min(3, int(settings.floors)))  # low-rise only
-        room_count = max(1, int(round(settings.room_count * (0.5 if fast_mode else 1.0))))
+        room_count = max(1, int(settings.room_count))
 
         stair_w = max(tile * 2, math.ceil(settings.stairs_width / tile) * tile)
         stair_d = tile * 4
