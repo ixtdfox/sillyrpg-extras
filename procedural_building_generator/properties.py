@@ -3,6 +3,15 @@ from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty, Po
 
 
 class PBSettings(bpy.types.PropertyGroup):
+    facade_module_mode: EnumProperty(
+        name="Facade Module Mode",
+        items=(
+            ("PROCEDURAL_ONLY", "Procedural Only", "Always build procedural facade and rooftop modules"),
+            ("HYBRID", "Hybrid", "Use assigned assets where available and procedural fallback otherwise"),
+            ("ASSET_PREFERRED", "Asset Preferred", "Prefer assigned assets and only fallback when a slot is unassigned"),
+        ),
+        default="HYBRID",
+    )
     width_m: FloatProperty(name="Width", default=16.0, min=8.0, step=200)
     depth_m: FloatProperty(name="Depth", default=12.0, min=8.0, step=200)
     floors: IntProperty(name="Floors", default=2, min=1, max=3)
@@ -87,10 +96,10 @@ class PBSettings(bpy.types.PropertyGroup):
     idle_full_rebuild_ms: IntProperty(name="Idle Full Rebuild ms", default=320, min=50, max=2000)
     auto_rebuild: BoolProperty(name="Auto Rebuild", default=True)
     window_asset: PointerProperty(name="Window Asset", type=bpy.types.Object)
-    door_asset: PointerProperty(name="Door Asset", type=bpy.types.Object)
+    entrance_asset: PointerProperty(name="Entrance Asset", type=bpy.types.Object)
     corner_asset: PointerProperty(name="Corner Asset", type=bpy.types.Object)
     balcony_asset: PointerProperty(name="Balcony Asset", type=bpy.types.Object)
-    service_wall_asset: PointerProperty(name="Service Wall Asset", type=bpy.types.Object)
+    rooftop_utility_asset: PointerProperty(name="Rooftop Utility Asset", type=bpy.types.Object)
     pb_last_rebuild_quality: StringProperty(name="Last Rebuild", default="none")
     pb_timer_pause_reason: StringProperty(name="Timer Pause Reason", default="none")
 

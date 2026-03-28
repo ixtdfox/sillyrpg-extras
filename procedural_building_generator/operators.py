@@ -185,10 +185,10 @@ class PB_OT_clear_all_assets(bpy.types.Operator):
     def execute(self, context):
         s = context.scene.pb_settings
         s.window_asset = None
-        s.door_asset = None
+        s.entrance_asset = None
         s.corner_asset = None
         s.balcony_asset = None
-        s.service_wall_asset = None
+        s.rooftop_utility_asset = None
         self.report({'INFO'}, "All asset assignments cleared")
         return {'FINISHED'}
 

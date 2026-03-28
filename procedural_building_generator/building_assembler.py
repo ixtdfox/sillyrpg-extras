@@ -12,10 +12,11 @@ from .utils import GENERATOR_TAG
 
 
 class BuildingAssembler:
-    def __init__(self, batch: MeshBatcher, generated_collection, asset_helper_collection):
+    def __init__(self, batch: MeshBatcher, generated_collection, asset_helper_collection, asset_instance_collection):
         self.batch = batch
         self.generated_collection = generated_collection
         self.asset_helper_collection = asset_helper_collection
+        self.asset_instance_collection = asset_instance_collection
 
     def add_box(self, group, sx, sy, sz, center):
         self.batch.add_box(group, sx, sy, sz, center)
@@ -182,6 +183,10 @@ class BuildingAssembler:
             if placed and layout_mode != "sparse" and idx % 3 == 0 and group == "roof":
                 # lightweight panel support for rooftop canopy/panel read
                 self.add_box("trim", sx * 0.9, max(0.04, settings.wall_thickness * 0.2), 0.06, self.local_to_world(shape, root, px, py - sy * 0.18, roof_z + 0.14))
+
+            if placed and group in {"trim", "roof"}:
+                center = self.local_to_world(shape, root, px, py, roof_z + 0.01)
+                self._place_rooftop_utility_asset(settings, center.x, center.y, roof_z + 0.01)
 
     def _build_top_floor_accents(self, settings, shape, style, root, roof_z, blocked_rects, rng):
         safe = self._safe_roof_rect(shape, settings)
@@ -514,7 +519,34 @@ class BuildingAssembler:
         inst.rotation_mode = 'XYZ'
         inst.location = (wx - bbox_center_x, wy - bbox_center_y, z_floor_world - bbox_min_z)
         inst.rotation_euler = (0.0, 0.0, rot_map.get(face, 0.0))
-        self.generated_collection.objects.link(inst)
+        self.asset_instance_collection.objects.link(inst)
+        return True
+
+    def _place_rooftop_utility_asset(self, settings, world_x, world_y, z_floor_world):
+        mode = getattr(settings, "facade_module_mode", "HYBRID")
+        if mode == "PROCEDURAL_ONLY":
+            return False
+        src_obj = getattr(settings, "rooftop_utility_asset", None)
+        if src_obj is None:
+            return False
+        if self.asset_helper_collection.objects.get(src_obj.name) is None:
+            self.asset_helper_collection.objects.link(src_obj)
+
+        inst = src_obj.copy()
+        inst.data = src_obj.data
+        inst.animation_data_clear()
+        inst["generated_by"] = GENERATOR_TAG
+        inst["pb_asset_instance"] = True
+        inst["pb_module_id"] = "RooftopUtilityModule"
+        inst.name = "PB_RooftopUtility_Instance"
+
+        bbox_center_x = sum(v[0] for v in src_obj.bound_box) / 8.0
+        bbox_center_y = sum(v[1] for v in src_obj.bound_box) / 8.0
+        bbox_min_z = min(v[2] for v in src_obj.bound_box)
+        inst.rotation_mode = 'XYZ'
+        inst.location = (world_x - bbox_center_x, world_y - bbox_center_y, z_floor_world - bbox_min_z)
+        inst.rotation_euler = (0.0, 0.0, 0.0)
+        self.asset_instance_collection.objects.link(inst)
         return True
     def build_inner_walls(self, settings, shape, root, floor_profile):
         lookup_v = {}

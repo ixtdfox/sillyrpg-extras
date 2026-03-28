@@ -3,6 +3,7 @@ import bpy
 GENERATOR_TAG = "PROC_BUILDING_ADDON"
 COLLECTION_NAME = "ProcBuilding_Runtime"
 ASSET_HELPER_COLLECTION_NAME = "ProcBuilding_FacadeAssets"
+ASSET_INSTANCES_COLLECTION_NAME = "ProcBuilding_AssetInstances"
 ROOT_NAME = "BuildingRoot"
 HANDLE_NAME = "BuildingSizeHandle"
 
