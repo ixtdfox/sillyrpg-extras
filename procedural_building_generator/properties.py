@@ -1,5 +1,5 @@
 import bpy
-from bpy.props import BoolProperty, FloatProperty, IntProperty
+from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty
 
 
 class PBSettings(bpy.types.PropertyGroup):
@@ -9,6 +9,16 @@ class PBSettings(bpy.types.PropertyGroup):
     room_count: IntProperty(name="Rooms", default=6, min=1, max=12)
     seed: IntProperty(name="Seed", default=11)
     detail_amount: FloatProperty(name="Detail", default=0.75, min=0.0, max=1.0)
+    style_preset: EnumProperty(
+        name="Style Preset",
+        items=(
+            ("SCIENTIST_HOUSING", "ScientistHousing", "High-glazing research district housing"),
+            ("TECHNICIAN_HOUSING", "TechnicianHousing", "Practical mixed service + residential rhythm"),
+            ("SECURITY_HOUSING", "SecurityHousing", "Heavier fortified rhythm with reduced glazing"),
+            ("SERVICE_BLOCK", "ServiceBlock", "Utility-forward block with sparse balconies"),
+        ),
+        default="SCIENTIST_HOUSING",
+    )
     balcony_chance: FloatProperty(name="Balconies", default=0.45, min=0.0, max=1.0)
     roof_style: IntProperty(name="Roof Style", default=1, min=0, max=2)
     tile_size: FloatProperty(name="Tile Size", default=2.0, min=1.0)

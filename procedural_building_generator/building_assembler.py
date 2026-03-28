@@ -124,6 +124,18 @@ class BuildingAssembler:
                 self.add_box("wall", settings.wall_thickness, tile, settings.floor_height, (wx, wy, root.location.z + z_floor + settings.floor_height * 0.5))
             return
 
+        if module_id == "AccentPanelModule":
+            inset = max(0.05, settings.wall_thickness * 0.2)
+            panel_h = settings.floor_height * 0.72
+            panel_z = root.location.z + z_floor + panel_h * 0.5 + settings.floor_height * 0.14
+            if face in {"front", "back"}:
+                self.add_box("trim", tile * 0.82, settings.wall_thickness * 0.42, panel_h, (wx, wy - inset if face == "front" else wy + inset, panel_z))
+                self.add_box("wall", tile, settings.wall_thickness, settings.floor_height, (wx, wy, root.location.z + z_floor + settings.floor_height * 0.5))
+            else:
+                self.add_box("trim", settings.wall_thickness * 0.42, tile * 0.82, panel_h, (wx - inset if face == "left" else wx + inset, wy, panel_z))
+                self.add_box("wall", settings.wall_thickness, tile, settings.floor_height, (wx, wy, root.location.z + z_floor + settings.floor_height * 0.5))
+            return
+
         outward = {
             "front": +1,
             "back": -1,
