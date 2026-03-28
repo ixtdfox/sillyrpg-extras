@@ -4,13 +4,17 @@ import math
 
 from mathutils import Vector
 
+from .asset_facade_module import resolve_asset_module
 from .batching import MeshBatcher
 from .building_shape import build_adjacency
+from .utils import GENERATOR_TAG
 
 
 class BuildingAssembler:
-    def __init__(self, batch: MeshBatcher):
+    def __init__(self, batch: MeshBatcher, generated_collection, asset_helper_collection):
         self.batch = batch
+        self.generated_collection = generated_collection
+        self.asset_helper_collection = asset_helper_collection
 
     def add_box(self, group, sx, sy, sz, center):
         self.batch.add_box(group, sx, sy, sz, center)
@@ -104,6 +108,9 @@ class BuildingAssembler:
     def _build_facade_module(self, settings, shape, root, z_floor, face, wx, wy, module):
         module_id = module.id
         tile = shape.tile_size
+        if self._place_asset_module(settings, module_id, face, wx, wy, root.location.z + z_floor):
+            return
+
         if module_id == "EntranceDoorModule":
             dw = settings.door_width
             dh = settings.door_height
@@ -155,6 +162,39 @@ class BuildingAssembler:
                 0.08,
                 (wx, wy + y_offset, root.location.z + z_floor + settings.window_sill_h - 0.04),
             )
+
+    def _place_asset_module(self, settings, module_id, face, wx, wy, z_floor_world):
+        asset_module = resolve_asset_module(settings, module_id)
+        src_obj = asset_module.asset_object
+        if src_obj is None:
+            return False
+
+        if self.asset_helper_collection.objects.get(src_obj.name) is None:
+            self.asset_helper_collection.objects.link(src_obj)
+
+        inst = src_obj.copy()
+        inst.data = src_obj.data
+        inst.animation_data_clear()
+        inst["generated_by"] = GENERATOR_TAG
+        inst["pb_asset_instance"] = True
+        inst["pb_module_id"] = module_id
+        inst.name = f"PB_{module_id}_Instance"
+
+        rot_map = {
+            "front": 0.0,
+            "right": math.pi * 0.5,
+            "back": math.pi,
+            "left": -math.pi * 0.5,
+        }
+        bbox_center_x = sum(v[0] for v in src_obj.bound_box) / 8.0
+        bbox_center_y = sum(v[1] for v in src_obj.bound_box) / 8.0
+        bbox_min_z = min(v[2] for v in src_obj.bound_box)
+
+        inst.rotation_mode = 'XYZ'
+        inst.location = (wx - bbox_center_x, wy - bbox_center_y, z_floor_world - bbox_min_z)
+        inst.rotation_euler = (0.0, 0.0, rot_map.get(face, 0.0))
+        self.generated_collection.objects.link(inst)
+        return True
     def build_inner_walls(self, settings, shape, root, floor_profile):
         lookup_v = {}
         lookup_h = {}

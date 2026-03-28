@@ -1,5 +1,5 @@
 import bpy
-from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty
+from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty, PointerProperty
 
 
 class PBSettings(bpy.types.PropertyGroup):
@@ -44,6 +44,11 @@ class PBSettings(bpy.types.PropertyGroup):
     rebuild_interval_ms: IntProperty(name="Rebuild Interval ms", default=120, min=10, max=1000)
     idle_full_rebuild_ms: IntProperty(name="Idle Full Rebuild ms", default=320, min=50, max=2000)
     auto_rebuild: BoolProperty(name="Auto Rebuild", default=True)
+    window_asset: PointerProperty(name="Window Asset", type=bpy.types.Object)
+    door_asset: PointerProperty(name="Door Asset", type=bpy.types.Object)
+    corner_asset: PointerProperty(name="Corner Asset", type=bpy.types.Object)
+    balcony_asset: PointerProperty(name="Balcony Asset", type=bpy.types.Object)
+    service_wall_asset: PointerProperty(name="Service Wall Asset", type=bpy.types.Object)
 
 
 classes = (PBSettings,)
