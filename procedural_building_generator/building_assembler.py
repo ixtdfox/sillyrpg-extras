@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import random
 
 from mathutils import Vector
 
@@ -40,6 +41,173 @@ class BuildingAssembler:
             sx = shape.width_m - x1
             sy = y1 - y0
             self.add_box(group, sx, sy, thickness, self.local_to_world(shape, root, x1 + sx * 0.5, y0 + sy * 0.5, z_center))
+
+    @staticmethod
+    def _rects_overlap(a, b):
+        return not (a[2] <= b[0] or a[0] >= b[2] or a[3] <= b[1] or a[1] >= b[3])
+
+    def _safe_roof_rect(self, shape, settings):
+        inset = max(settings.parapet_thickness + 0.06, settings.wall_thickness * 0.35)
+        return (inset, inset, max(inset + 0.1, shape.width_m - inset), max(inset + 0.1, shape.depth_m - inset))
+
+    def _add_roof_box_if_valid(self, shape, root, rect, z_bottom, h, group, avoid_rects):
+        x0, y0, x1, y1 = rect
+        if x1 - x0 <= 0.08 or y1 - y0 <= 0.08 or h <= 0.01:
+            return False
+        for blocked in avoid_rects:
+            if self._rects_overlap(rect, blocked):
+                return False
+        self.add_box(
+            group,
+            x1 - x0,
+            y1 - y0,
+            h,
+            self.local_to_world(shape, root, (x0 + x1) * 0.5, (y0 + y1) * 0.5, z_bottom + h * 0.5),
+        )
+        return True
+
+    def _build_roof_silhouette(self, settings, shape, root, roof_z, blocked_rects, rng):
+        profile = getattr(settings, "roof_profile", "RAISED_PARAPET")
+        parapet_h = settings.parapet_height
+        parapet_t = settings.parapet_thickness
+        if profile == "FLAT":
+            parapet_h *= 0.72
+        elif profile == "RAISED_PARAPET":
+            parapet_h *= 1.35
+        elif profile == "STEPPED_PARAPET":
+            parapet_h *= 1.15
+        elif profile == "ACCESS_VOLUME":
+            parapet_h *= 1.0
+
+        top_z = roof_z + parapet_h * 0.5
+        self.add_box("trim", shape.width_m, parapet_t, parapet_h, self.local_to_world(shape, root, shape.width_m * 0.5, 0.0, top_z))
+        self.add_box("trim", shape.width_m, parapet_t, parapet_h, self.local_to_world(shape, root, shape.width_m * 0.5, shape.depth_m, top_z))
+        self.add_box("trim", parapet_t, shape.depth_m, parapet_h, self.local_to_world(shape, root, 0.0, shape.depth_m * 0.5, top_z))
+        self.add_box("trim", parapet_t, shape.depth_m, parapet_h, self.local_to_world(shape, root, shape.width_m, shape.depth_m * 0.5, top_z))
+
+        safe = self._safe_roof_rect(shape, settings)
+
+        if profile == "STEPPED_PARAPET":
+            step_h = max(0.08, parapet_h * 0.32)
+            step_t = max(parapet_t * 0.85, settings.wall_thickness * 0.22)
+            step_len = max(shape.tile_size * 1.2, shape.width_m * 0.22)
+            y_front = safe[1] + step_t * 0.5
+            y_back = safe[3] - step_t * 0.5
+            z = roof_z + parapet_h + step_h * 0.5
+            x_a = safe[0] + step_len * 0.5
+            x_b = safe[2] - step_len * 0.5
+            self.add_box("trim", step_len, step_t, step_h, self.local_to_world(shape, root, x_a, y_front, z))
+            self.add_box("trim", step_len, step_t, step_h, self.local_to_world(shape, root, x_b, y_front, z))
+            self.add_box("trim", step_len, step_t, step_h, self.local_to_world(shape, root, x_a, y_back, z))
+            self.add_box("trim", step_len, step_t, step_h, self.local_to_world(shape, root, x_b, y_back, z))
+
+        if profile in {"ACCESS_VOLUME", "RAISED_PARAPET"}:
+            vol_w = max(shape.tile_size * 1.2, min(shape.width_m * 0.28, shape.width_m - shape.tile_size * 2.0))
+            vol_d = max(shape.tile_size * 1.1, min(shape.depth_m * 0.22, shape.depth_m - shape.tile_size * 2.0))
+            vol_h = max(settings.floor_height * 0.32, 0.9)
+            side = "front" if rng.random() < 0.5 else "back"
+            y0 = safe[1] + 0.45 if side == "front" else safe[3] - vol_d - 0.45
+            x0 = safe[0] + (safe[2] - safe[0] - vol_w) * (0.2 + rng.random() * 0.6)
+            access_rect = (x0, y0, x0 + vol_w, y0 + vol_d)
+            if self._add_roof_box_if_valid(shape, root, access_rect, roof_z + 0.01, vol_h, "wall", blocked_rects):
+                blocked_rects.append(access_rect)
+                door_h = min(vol_h * 0.74, settings.door_height * 0.85)
+                door_w = min(vol_w * 0.34, settings.door_width)
+                if side == "front":
+                    self.add_box("glass", door_w, settings.wall_thickness * 0.3, door_h, self.local_to_world(shape, root, x0 + vol_w * 0.5, y0 + settings.wall_thickness * 0.18, roof_z + door_h * 0.5))
+                else:
+                    self.add_box("glass", door_w, settings.wall_thickness * 0.3, door_h, self.local_to_world(shape, root, x0 + vol_w * 0.5, y0 + vol_d - settings.wall_thickness * 0.18, roof_z + door_h * 0.5))
+
+        return parapet_h
+
+    def _build_rooftop_equipment(self, settings, shape, root, roof_z, blocked_rects, rng):
+        density = max(0.0, min(1.0, getattr(settings, "roof_detail_density", 0.5)))
+        amount = max(0, int(getattr(settings, "rooftop_equipment_amount", 0)))
+        if density <= 0.01 or amount <= 0:
+            return
+
+        safe = self._safe_roof_rect(shape, settings)
+        layout_mode = rng.choice(("central", "offset", "sparse"))
+        spawn = max(1, round(amount * (0.5 + density * 0.9)))
+        if layout_mode == "sparse":
+            spawn = max(1, round(spawn * 0.55))
+
+        cx = (safe[0] + safe[2]) * 0.5
+        cy = (safe[1] + safe[3]) * 0.5
+        for idx in range(spawn):
+            if layout_mode == "central":
+                px = cx + (rng.random() - 0.5) * (safe[2] - safe[0]) * 0.36
+                py = cy + (rng.random() - 0.5) * (safe[3] - safe[1]) * 0.36
+            elif layout_mode == "offset":
+                px = safe[0] + (safe[2] - safe[0]) * (0.18 + 0.64 * rng.random())
+                py = safe[1] + (safe[3] - safe[1]) * (0.1 + 0.34 * rng.random()) if rng.random() < 0.5 else safe[1] + (safe[3] - safe[1]) * (0.56 + 0.34 * rng.random())
+            else:
+                px = safe[0] + (safe[2] - safe[0]) * (0.1 + 0.8 * rng.random())
+                py = safe[1] + (safe[3] - safe[1]) * (0.1 + 0.8 * rng.random())
+
+            kind_roll = rng.random()
+            if kind_roll < 0.26:
+                # HVAC box
+                sx = shape.tile_size * (0.45 + rng.random() * 0.55)
+                sy = shape.tile_size * (0.35 + rng.random() * 0.5)
+                h = 0.32 + rng.random() * 0.55
+                group = "trim"
+            elif kind_roll < 0.48:
+                # Vent shaft
+                s = shape.tile_size * (0.18 + rng.random() * 0.18)
+                sx = sy = s
+                h = 0.6 + rng.random() * 0.95
+                group = "trim"
+            elif kind_roll < 0.66 and rng.random() < getattr(settings, "skylight_chance", 0.35):
+                # Skylight block
+                sx = shape.tile_size * (0.46 + rng.random() * 0.4)
+                sy = shape.tile_size * (0.34 + rng.random() * 0.35)
+                h = 0.22 + rng.random() * 0.18
+                group = "glass"
+            elif kind_roll < 0.82 and rng.random() < getattr(settings, "solar_panel_chance", 0.45):
+                # Solar panel group (thin tilted reads)
+                sx = shape.tile_size * (0.82 + rng.random() * 0.9)
+                sy = shape.tile_size * (0.3 + rng.random() * 0.24)
+                h = 0.08 + rng.random() * 0.05
+                group = "roof"
+            else:
+                # Service hatch
+                sx = shape.tile_size * (0.34 + rng.random() * 0.25)
+                sy = shape.tile_size * (0.34 + rng.random() * 0.25)
+                h = 0.09 + rng.random() * 0.06
+                group = "roof"
+
+            rect = (px - sx * 0.5, py - sy * 0.5, px + sx * 0.5, py + sy * 0.5)
+            placed = self._add_roof_box_if_valid(shape, root, rect, roof_z + 0.01, h, group, blocked_rects)
+            if placed and layout_mode != "sparse" and idx % 3 == 0 and group == "roof":
+                # lightweight panel support for rooftop canopy/panel read
+                self.add_box("trim", sx * 0.9, max(0.04, settings.wall_thickness * 0.2), 0.06, self.local_to_world(shape, root, px, py - sy * 0.18, roof_z + 0.14))
+
+    def _build_top_floor_accents(self, settings, shape, root, roof_z, blocked_rects, rng):
+        safe = self._safe_roof_rect(shape, settings)
+        choice = rng.choice(("setback", "canopy", "utility"))
+        if choice == "setback":
+            band_d = max(shape.tile_size * 0.55, shape.depth_m * 0.11)
+            rect = (safe[0], safe[1], safe[2], min(safe[3], safe[1] + band_d))
+            if self._add_roof_box_if_valid(shape, root, rect, roof_z + 0.01, 0.12, "trim", blocked_rects):
+                self.add_box("roof", rect[2] - rect[0], 0.08, 0.06, self.local_to_world(shape, root, (rect[0] + rect[2]) * 0.5, rect[3], roof_z + 0.15))
+        elif choice == "canopy":
+            strip_d = max(0.45, min(shape.depth_m * 0.08, shape.tile_size * 0.6))
+            strip_w = max(shape.width_m * 0.34, shape.tile_size * 2.0)
+            cx = shape.width_m * (0.32 + rng.random() * 0.36)
+            x0 = max(safe[0], cx - strip_w * 0.5)
+            x1 = min(safe[2], cx + strip_w * 0.5)
+            rect = (x0, safe[1], x1, safe[1] + strip_d)
+            self._add_roof_box_if_valid(shape, root, rect, roof_z + 0.22, 0.08, "trim", blocked_rects)
+        else:
+            util_w = max(shape.tile_size * 1.1, min(shape.width_m * 0.2, shape.width_m - shape.tile_size * 2.2))
+            util_d = max(shape.tile_size * 0.95, min(shape.depth_m * 0.18, shape.depth_m - shape.tile_size * 2.0))
+            util_h = max(0.72, settings.floor_height * 0.28)
+            x0 = safe[0] + (safe[2] - safe[0] - util_w) * (0.12 + rng.random() * 0.76)
+            y0 = safe[1] + (safe[3] - safe[1] - util_d) * (0.2 + rng.random() * 0.65)
+            rect = (x0, y0, x0 + util_w, y0 + util_d)
+            if self._add_roof_box_if_valid(shape, root, rect, roof_z + 0.01, util_h, "wall", blocked_rects):
+                blocked_rects.append(rect)
 
     def add_window_parts(self, settings, wx, wy, z_floor, axis, outward_sign, root):
         sill = settings.window_sill_h
@@ -471,12 +639,9 @@ class BuildingAssembler:
             if not floor_profile.is_top:
                 self.build_stairs(settings, shape, root, floor_profile)
 
-        top_z = shape.floors * settings.floor_height + settings.parapet_height * 0.5
-        self.add_box("trim", shape.width_m, settings.parapet_thickness, settings.parapet_height,
-                     self.local_to_world(shape, root, shape.width_m * 0.5, 0.0, top_z))
-        self.add_box("trim", shape.width_m, settings.parapet_thickness, settings.parapet_height,
-                     self.local_to_world(shape, root, shape.width_m * 0.5, shape.depth_m, top_z))
-        self.add_box("trim", settings.parapet_thickness, shape.depth_m, settings.parapet_height,
-                     self.local_to_world(shape, root, 0.0, shape.depth_m * 0.5, top_z))
-        self.add_box("trim", settings.parapet_thickness, shape.depth_m, settings.parapet_height,
-                     self.local_to_world(shape, root, shape.width_m, shape.depth_m * 0.5, top_z))
+        roof_z = shape.floors * settings.floor_height
+        blocked_rects = [shape.stair_opening]
+        rng = random.Random((int(settings.seed) * 73856093) ^ (shape.floors * 19349663) ^ int(shape.width_m * 100) ^ (int(shape.depth_m * 100) << 1))
+        self._build_roof_silhouette(settings, shape, root, roof_z, blocked_rects, rng)
+        self._build_rooftop_equipment(settings, shape, root, roof_z, blocked_rects, rng)
+        self._build_top_floor_accents(settings, shape, root, roof_z, blocked_rects, rng)
