@@ -59,7 +59,12 @@ def read_style_sig():
     return (
         s.seed,
         round(s.detail_amount, 4),
+        round(s.facade_variation, 4),
+        round(s.accent_strength, 4),
         round(s.balcony_chance, 4),
+        round(s.band_density, 4),
+        round(s.vertical_fins, 4),
+        s.entrance_style,
         s.roof_style,
         s.style_preset,
         int(s.interactive_preview),

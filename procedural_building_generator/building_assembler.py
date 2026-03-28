@@ -105,6 +105,9 @@ class BuildingAssembler:
                 wx, wy = p.x + x_sign * settings.wall_thickness * 0.5, p.y
                 self._build_facade_module(settings, shape, root, z_floor, face, wx, wy, module)
 
+        self._build_horizontal_accents(settings, shape, floor_profile, root)
+        self._build_vertical_accents(settings, shape, floor_profile, root, front_slots, back_slots, left_slots, right_slots)
+
     def _build_facade_module(self, settings, shape, root, z_floor, face, wx, wy, module):
         module_id = module.id
         tile = shape.tile_size
@@ -112,23 +115,18 @@ class BuildingAssembler:
             return
 
         if module_id == "EntranceDoorModule":
-            dw = settings.door_width
-            dh = settings.door_height
-            side = (tile - dw) * 0.5
-            if side > 0.05:
-                self.add_box("trim", side, settings.wall_thickness, dh, (wx - dw * 0.5 - side * 0.5, wy, root.location.z + z_floor + dh * 0.5))
-                self.add_box("trim", side, settings.wall_thickness, dh, (wx + dw * 0.5 + side * 0.5, wy, root.location.z + z_floor + dh * 0.5))
-            top_h = settings.floor_height - dh
-            if top_h > 0.05:
-                self.add_box("trim", tile, settings.wall_thickness, top_h, (wx, wy, root.location.z + z_floor + dh + top_h * 0.5))
-            self.add_box("glass", dw * 0.9, settings.wall_thickness * 0.35, dh * 0.92, (wx, wy + settings.wall_thickness * 0.12, root.location.z + z_floor + dh * 0.5))
+            self._build_entrance_module(settings, root, z_floor, face, wx, wy, tile)
             return
 
-        if module_id in {"SolidWallModule", "ServiceWallModule", "CornerModule"}:
-            if face in {"front", "back"}:
-                self.add_box("wall", tile, settings.wall_thickness, settings.floor_height, (wx, wy, root.location.z + z_floor + settings.floor_height * 0.5))
-            else:
-                self.add_box("wall", settings.wall_thickness, tile, settings.floor_height, (wx, wy, root.location.z + z_floor + settings.floor_height * 0.5))
+        if module_id in {"SolidWallModule", "ServiceWallModule", "CornerModule", "SolidWallBayModule", "ServiceBayModule"}:
+            self._build_full_wall(face, settings, tile, wx, wy, root.location.z + z_floor)
+            if module_id == "ServiceBayModule":
+                self._build_service_bay_overlay(face, settings, tile, wx, wy, root.location.z + z_floor)
+            return
+
+        if module_id == "RecessedStripModule":
+            self._build_full_wall(face, settings, tile, wx, wy, root.location.z + z_floor)
+            self._build_recessed_strip(face, settings, tile, wx, wy, root.location.z + z_floor)
             return
 
         if module_id == "AccentPanelModule":
@@ -143,6 +141,14 @@ class BuildingAssembler:
                 self.add_box("wall", settings.wall_thickness, tile, settings.floor_height, (wx, wy, root.location.z + z_floor + settings.floor_height * 0.5))
             return
 
+        if module_id == "NarrowWindowBayModule":
+            self._build_window_variant(settings, root, z_floor, face, wx, wy, width_factor=0.58, sill_offset=0.08)
+            return
+
+        if module_id == "WideWindowBayModule":
+            self._build_window_variant(settings, root, z_floor, face, wx, wy, width_factor=0.92, sill_offset=-0.03)
+            return
+
         outward = {
             "front": +1,
             "back": -1,
@@ -153,15 +159,156 @@ class BuildingAssembler:
         self.add_window_parts(settings, wx, wy, z_floor, axis, outward, root)
 
         if module_id == "BalconyModule" and face in {"front", "back"}:
-            balcony_depth = max(0.15, settings.wall_thickness * 1.6)
-            y_offset = -balcony_depth * 0.5 if face == "front" else balcony_depth * 0.5
+            self._build_balcony_variant(settings, root, z_floor, face, wx, wy, tile)
+
+    def _build_window_variant(self, settings, root, z_floor, face, wx, wy, width_factor: float, sill_offset: float):
+        local = type("VariantSettings", (), {})()
+        for key in ("window_sill_h", "window_head_h", "tile_size", "wall_thickness", "floor_height"):
+            setattr(local, key, getattr(settings, key))
+        local.window_sill_h = max(0.2, settings.window_sill_h + sill_offset)
+        local.window_head_h = min(settings.floor_height - 0.1, settings.window_head_h + sill_offset * 0.5)
+        local.tile_size = settings.tile_size * max(0.45, min(1.0, width_factor))
+        axis = "x" if face in {"front", "back"} else "y"
+        outward = {"front": +1, "back": -1, "left": -1, "right": +1}[face]
+        self.add_window_parts(local, wx, wy, z_floor, axis, outward, root)
+
+    def _build_full_wall(self, face, settings, tile, wx, wy, z_floor_world):
+        if face in {"front", "back"}:
+            self.add_box("wall", tile, settings.wall_thickness, settings.floor_height, (wx, wy, z_floor_world + settings.floor_height * 0.5))
+        else:
+            self.add_box("wall", settings.wall_thickness, tile, settings.floor_height, (wx, wy, z_floor_world + settings.floor_height * 0.5))
+
+    def _build_service_bay_overlay(self, face, settings, tile, wx, wy, z_floor_world):
+        panel_h = settings.floor_height * 0.34
+        panel_z = z_floor_world + settings.window_sill_h + panel_h * 0.55
+        if face in {"front", "back"}:
+            self.add_box("trim", tile * 0.82, settings.wall_thickness * 0.4, panel_h, (wx, wy, panel_z))
+        else:
+            self.add_box("trim", settings.wall_thickness * 0.4, tile * 0.82, panel_h, (wx, wy, panel_z))
+
+    def _build_recessed_strip(self, face, settings, tile, wx, wy, z_floor_world):
+        strip_h = settings.floor_height * 0.8
+        strip_z = z_floor_world + settings.floor_height * 0.52
+        recess = settings.wall_thickness * 0.25
+        if face == "front":
+            self.add_box("trim", tile * 0.26, settings.wall_thickness * 0.2, strip_h, (wx, wy + recess, strip_z))
+        elif face == "back":
+            self.add_box("trim", tile * 0.26, settings.wall_thickness * 0.2, strip_h, (wx, wy - recess, strip_z))
+        elif face == "left":
+            self.add_box("trim", settings.wall_thickness * 0.2, tile * 0.26, strip_h, (wx + recess, wy, strip_z))
+        else:
+            self.add_box("trim", settings.wall_thickness * 0.2, tile * 0.26, strip_h, (wx - recess, wy, strip_z))
+
+    def _build_entrance_module(self, settings, root, z_floor, face, wx, wy, tile):
+        dw = settings.door_width
+        dh = settings.door_height
+        style = getattr(settings, "entrance_style", "RECESSED")
+        recess_depth = settings.wall_thickness * (1.4 if style in {"RECESSED", "BOLD"} else 0.55)
+        canopy_factor = 0.25 if style == "FLAT" else (0.65 if style == "RECESSED" else 0.9)
+        frame_factor = 0.2 if style == "FLAT" else (0.6 if style == "RECESSED" else 0.85)
+        depth_sign = -1.0 if face == "front" else 1.0
+        door_plane_y = wy + depth_sign * recess_depth
+
+        side = (tile - dw) * 0.5
+        if side > 0.05:
+            self.add_box("trim", side, settings.wall_thickness, dh, (wx - dw * 0.5 - side * 0.5, wy, root.location.z + z_floor + dh * 0.5))
+            self.add_box("trim", side, settings.wall_thickness, dh, (wx + dw * 0.5 + side * 0.5, wy, root.location.z + z_floor + dh * 0.5))
+        top_h = settings.floor_height - dh
+        if top_h > 0.05:
+            self.add_box("trim", tile, settings.wall_thickness, top_h, (wx, wy, root.location.z + z_floor + dh + top_h * 0.5))
+        self.add_box("glass", dw * 0.9, settings.wall_thickness * 0.35, dh * 0.92, (wx, door_plane_y, root.location.z + z_floor + dh * 0.5))
+
+        if frame_factor > 0.3:
+            frame_w = settings.wall_thickness * (0.5 + frame_factor * 0.9)
+            frame_h = dh + 0.3
+            self.add_box("trim", frame_w, settings.wall_thickness * 0.9, frame_h, (wx - dw * 0.58, wy, root.location.z + z_floor + frame_h * 0.5))
+            self.add_box("trim", frame_w, settings.wall_thickness * 0.9, frame_h, (wx + dw * 0.58, wy, root.location.z + z_floor + frame_h * 0.5))
+
+        if canopy_factor > 0.3 and getattr(settings, "canopy_depth", 0.0) > 0.0:
+            depth = max(0.2, settings.canopy_depth * (0.45 + canopy_factor * 0.7))
+            width = max(dw + 0.6, settings.canopy_width * 0.5)
             self.add_box(
                 "trim",
-                tile * 0.85,
-                balcony_depth,
+                width,
+                depth,
                 0.08,
-                (wx, wy + y_offset, root.location.z + z_floor + settings.window_sill_h - 0.04),
+                (wx, wy + depth_sign * depth * 0.5, root.location.z + z_floor + min(settings.floor_height - 0.1, settings.canopy_height)),
             )
+
+    def _build_balcony_variant(self, settings, root, z_floor, face, wx, wy, tile):
+        style_seed = int(settings.seed) * 237 + int(round((wx + wy + z_floor) * 10.0))
+        rng = math.fmod(style_seed * 0.61803398875, 1.0)
+        is_projecting = rng > 0.45
+        if is_projecting:
+            depth = max(0.18, settings.wall_thickness * 2.2)
+            y_offset = -depth * 0.5 if face == "front" else depth * 0.5
+            self.add_box("trim", tile * 0.9, depth, 0.09, (wx, wy + y_offset, root.location.z + z_floor + settings.window_sill_h - 0.05))
+            rail_h = 0.82
+            self.add_box("trim", tile * 0.9, settings.wall_thickness * 0.35, rail_h, (wx, wy + (-depth if face == "front" else depth), root.location.z + z_floor + settings.window_sill_h + rail_h * 0.5))
+        else:
+            rail_h = 0.78
+            rail_y = wy + (-settings.wall_thickness * 0.45 if face == "front" else settings.wall_thickness * 0.45)
+            self.add_box("trim", tile * 0.76, settings.wall_thickness * 0.26, rail_h, (wx, rail_y, root.location.z + z_floor + settings.window_sill_h + rail_h * 0.5))
+
+    def _build_horizontal_accents(self, settings, shape, floor_profile, root):
+        z_floor = floor_profile.z_floor
+        band_density = getattr(settings, "band_density", 0.5)
+        strength = getattr(settings, "accent_strength", 0.5)
+        if band_density <= 0.01 and strength <= 0.01:
+            return
+        band_t = settings.wall_thickness * (0.22 + strength * 0.48)
+        if band_density > 0.15:
+            z = z_floor + settings.floor_height + settings.slab_thickness * 0.5
+            self._add_perimeter_band(settings, shape, root, z, band_t, "trim")
+        if band_density > 0.28:
+            z = z_floor + settings.window_sill_h
+            self._add_perimeter_band(settings, shape, root, z, band_t * 0.7, "trim")
+        if floor_profile.is_top:
+            z = z_floor + settings.floor_height + settings.parapet_height * 0.2
+            self._add_perimeter_band(settings, shape, root, z, band_t * 1.2, "roof")
+
+    def _add_perimeter_band(self, settings, shape, root, z, thickness, group):
+        h = max(0.04, thickness)
+        self.add_box(group, shape.width_m, thickness, h, self.local_to_world(shape, root, shape.width_m * 0.5, 0.0, z))
+        self.add_box(group, shape.width_m, thickness, h, self.local_to_world(shape, root, shape.width_m * 0.5, shape.depth_m, z))
+        self.add_box(group, thickness, shape.depth_m, h, self.local_to_world(shape, root, 0.0, shape.depth_m * 0.5, z))
+        self.add_box(group, thickness, shape.depth_m, h, self.local_to_world(shape, root, shape.width_m, shape.depth_m * 0.5, z))
+
+    def _build_vertical_accents(self, settings, shape, floor_profile, root, front_slots, back_slots, left_slots, right_slots):
+        fin_strength = getattr(settings, "vertical_fins", 0.45)
+        if fin_strength <= 0.01:
+            return
+        z = floor_profile.z_floor + settings.floor_height * 0.5
+        fin_w = settings.tile_size * (0.08 + fin_strength * 0.16)
+        fin_d = settings.wall_thickness * (0.24 + fin_strength * 0.55)
+        fin_h = settings.floor_height * (0.75 + fin_strength * 0.2)
+
+        def add_fin(face, cx, cy):
+            if face == "front":
+                self.add_box("trim", fin_w, fin_d, fin_h, (cx, cy - fin_d * 0.5, root.location.z + z))
+            elif face == "back":
+                self.add_box("trim", fin_w, fin_d, fin_h, (cx, cy + fin_d * 0.5, root.location.z + z))
+            elif face == "left":
+                self.add_box("trim", fin_d, fin_w, fin_h, (cx - fin_d * 0.5, cy, root.location.z + z))
+            else:
+                self.add_box("trim", fin_d, fin_w, fin_h, (cx + fin_d * 0.5, cy, root.location.z + z))
+
+        for ix, module in enumerate(front_slots):
+            if module.id in {"SolidWallBayModule", "RecessedStripModule", "ServiceBayModule"}:
+                cx = self.local_to_world(shape, root, ix * settings.tile_size + settings.tile_size * 0.5, 0.0, 0.0).x
+                add_fin("front", cx, self.local_to_world(shape, root, 0.0, 0.0, 0.0).y)
+        for ix, module in enumerate(back_slots):
+            if module.id in {"SolidWallBayModule", "RecessedStripModule", "ServiceBayModule"}:
+                cx = self.local_to_world(shape, root, ix * settings.tile_size + settings.tile_size * 0.5, shape.depth_m, 0.0).x
+                add_fin("back", cx, self.local_to_world(shape, root, 0.0, shape.depth_m, 0.0).y)
+        for iy, module in enumerate(left_slots):
+            if module.id in {"SolidWallBayModule", "RecessedStripModule", "ServiceBayModule"}:
+                cy = self.local_to_world(shape, root, 0.0, iy * settings.tile_size + settings.tile_size * 0.5, 0.0).y
+                add_fin("left", self.local_to_world(shape, root, 0.0, 0.0, 0.0).x, cy)
+        for iy, module in enumerate(right_slots):
+            if module.id in {"SolidWallBayModule", "RecessedStripModule", "ServiceBayModule"}:
+                cy = self.local_to_world(shape, root, shape.width_m, iy * settings.tile_size + settings.tile_size * 0.5, 0.0).y
+                add_fin("right", self.local_to_world(shape, root, shape.width_m, 0.0, 0.0).x, cy)
 
     def _place_asset_module(self, settings, module_id, face, wx, wy, z_floor_world):
         asset_module = resolve_asset_module(settings, module_id)
