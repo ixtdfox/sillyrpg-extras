@@ -88,6 +88,11 @@ class BuildingStyle:
     entrance_preference: str
     roof_profile_preference: str
     roof_detail_density: float
+    material_palette: str
+    wall_tint_variation: float
+    dirt_amount: float
+    glass_tint_strength: float
+    accent_color_strength: float
     wall_tint: tuple[float, float, float]
     trim_tint: tuple[float, float, float]
     accent_tint: tuple[float, float, float]
@@ -109,6 +114,12 @@ class BuildingStyle:
         vertical_fins = cls._clamp01(float(getattr(settings, "vertical_fins", settings.detail_amount)) * 0.45 + preset_data["vertical_fins"] * 0.55)
         roof_density = cls._clamp01(float(getattr(settings, "roof_detail_density", 0.55)) * 0.55 + preset_data["roof_detail_density"] * 0.45)
         balcony_density = cls._clamp01(float(getattr(settings, "balcony_chance", 0.45)) * 0.35 + preset_data["balcony_preference"] * 0.65)
+        wall_tint, trim_tint, accent_tint = cls._palette_tints(
+            str(getattr(settings, "material_palette", "PRESET")),
+            tuple(preset_data["wall_tint"]),
+            tuple(preset_data["trim_tint"]),
+            tuple(preset_data["accent_tint"]),
+        )
         return cls(
             seed=int(settings.seed),
             side_window_probability=side_prob,
@@ -131,9 +142,14 @@ class BuildingStyle:
             entrance_preference=str(preset_data["entrance_style"]),
             roof_profile_preference=str(preset_data["roof_profile"]),
             roof_detail_density=roof_density,
-            wall_tint=tuple(preset_data["wall_tint"]),
-            trim_tint=tuple(preset_data["trim_tint"]),
-            accent_tint=tuple(preset_data["accent_tint"]),
+            material_palette=str(getattr(settings, "material_palette", "PRESET")),
+            wall_tint_variation=cls._clamp01(float(getattr(settings, "wall_tint_variation", 0.28))),
+            dirt_amount=cls._clamp01(float(getattr(settings, "dirt_amount", 0.34))),
+            glass_tint_strength=cls._clamp01(float(getattr(settings, "glass_tint_strength", 0.62))),
+            accent_color_strength=cls._clamp01(float(getattr(settings, "accent_color_strength", 0.72))),
+            wall_tint=wall_tint,
+            trim_tint=trim_tint,
+            accent_tint=accent_tint,
             ground_profile=ground,
             typical_profile=typical,
             top_profile=top,
@@ -478,6 +494,23 @@ class BuildingStyle:
     @staticmethod
     def _clamp01(value: float) -> float:
         return max(0.0, min(1.0, value))
+
+    @classmethod
+    def _palette_tints(
+        cls,
+        palette: str,
+        wall_tint: tuple[float, float, float],
+        trim_tint: tuple[float, float, float],
+        accent_tint: tuple[float, float, float],
+    ) -> tuple[tuple[float, float, float], tuple[float, float, float], tuple[float, float, float]]:
+        palette_map = {
+            "PRESET": (wall_tint, trim_tint, accent_tint),
+            "NEUTRAL": ((0.89, 0.89, 0.87), (0.82, 0.82, 0.80), (0.42, 0.49, 0.56)),
+            "COOL": ((0.84, 0.87, 0.90), (0.75, 0.79, 0.83), (0.35, 0.50, 0.67)),
+            "WARM": ((0.92, 0.88, 0.83), (0.84, 0.80, 0.76), (0.60, 0.46, 0.36)),
+            "INDUSTRIAL": ((0.78, 0.79, 0.80), (0.68, 0.69, 0.71), (0.48, 0.54, 0.58)),
+        }
+        return palette_map.get(palette, palette_map["PRESET"])
 
     @classmethod
     def _make_profiles(cls, ground: dict, typical: dict, top: dict) -> tuple[GroundFloorProfile, TypicalFloorProfile, TopFloorProfile]:
