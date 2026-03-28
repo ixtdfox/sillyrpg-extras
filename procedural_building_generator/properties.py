@@ -19,6 +19,21 @@ class PBSettings(bpy.types.PropertyGroup):
         ),
         default="SCIENTIST_HOUSING",
     )
+    material_palette: EnumProperty(
+        name="Material Palette",
+        items=(
+            ("PRESET", "Preset Driven", "Use palette values from selected style preset"),
+            ("NEUTRAL", "Neutral", "Balanced neutral plaster and trim palette"),
+            ("COOL", "Cool", "Slightly cooler concrete and glass tint"),
+            ("WARM", "Warm", "Warmer painted concrete and trim tint"),
+            ("INDUSTRIAL", "Industrial", "Darker utilitarian tones with restrained accent"),
+        ),
+        default="PRESET",
+    )
+    wall_tint_variation: FloatProperty(name="Wall Tint Variation", default=0.28, min=0.0, max=1.0)
+    dirt_amount: FloatProperty(name="Wall Dirt Amount", default=0.34, min=0.0, max=1.0)
+    glass_tint_strength: FloatProperty(name="Glass Tint Strength", default=0.62, min=0.0, max=1.0)
+    accent_color_strength: FloatProperty(name="Accent Color Strength", default=0.72, min=0.0, max=1.0)
     balcony_chance: FloatProperty(name="Balconies", default=0.45, min=0.0, max=1.0)
     facade_variation: FloatProperty(name="Facade Variation", default=0.65, min=0.0, max=1.0)
     accent_strength: FloatProperty(name="Accent Strength", default=0.55, min=0.0, max=1.0)
