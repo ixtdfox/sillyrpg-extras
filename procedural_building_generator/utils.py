@@ -2,6 +2,7 @@ import bpy
 
 GENERATOR_TAG = "PROC_BUILDING_ADDON"
 COLLECTION_NAME = "ProcBuilding_Runtime"
+ASSET_HELPER_COLLECTION_NAME = "ProcBuilding_FacadeAssets"
 ROOT_NAME = "BuildingRoot"
 HANDLE_NAME = "BuildingSizeHandle"
 
@@ -20,6 +21,18 @@ def ensure_collection(name):
         return col
     col = bpy.data.collections.new(name)
     bpy.context.scene.collection.children.link(col)
+    return col
+
+
+def ensure_child_collection(parent, name, hidden=False):
+    col = bpy.data.collections.get(name)
+    if col is None:
+        col = bpy.data.collections.new(name)
+    if parent.children.get(col.name) is None:
+        parent.children.link(col)
+    if hidden:
+        col.hide_viewport = True
+        col.hide_render = True
     return col
 
 

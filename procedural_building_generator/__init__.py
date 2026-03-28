@@ -67,6 +67,11 @@ def read_style_sig():
         s.rebuild_interval_ms,
         s.idle_full_rebuild_ms,
         int(s.auto_rebuild),
+        getattr(s.window_asset, "name_full", ""),
+        getattr(s.door_asset, "name_full", ""),
+        getattr(s.corner_asset, "name_full", ""),
+        getattr(s.balcony_asset, "name_full", ""),
+        getattr(s.service_wall_asset, "name_full", ""),
     )
 
 

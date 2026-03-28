@@ -5,10 +5,12 @@ from .building_assembler import BuildingAssembler
 from .building_shape import BuildingShape
 from .building_style import BuildingStyle
 from .utils import (
+    ASSET_HELPER_COLLECTION_NAME,
     COLLECTION_NAME,
     HANDLE_NAME,
     ROOT_NAME,
     clear_generated_objects,
+    ensure_child_collection,
     ensure_collection,
     ensure_empty,
     ensure_materials,
@@ -21,6 +23,7 @@ class BuildingGenerator:
 
     def __init__(self):
         self.col = ensure_collection(COLLECTION_NAME)
+        self.asset_helper_col = ensure_child_collection(self.col, ASSET_HELPER_COLLECTION_NAME, hidden=True)
         self.mats = ensure_materials()
         self.batch = MeshBatcher()
         self.fast_mode = False
@@ -68,7 +71,7 @@ class BuildingGenerator:
 
         shape = self.resolve_shape(settings, rebuild_shape)
         style = BuildingStyle.from_settings(settings, self.fast_mode)
-        assembler = BuildingAssembler(self.batch)
+        assembler = BuildingAssembler(self.batch, self.col, self.asset_helper_col)
         assembler.assemble(settings, shape, style, root)
 
         self.batch.build_objects(self.col, self.mats, smooth=not self.fast_mode)

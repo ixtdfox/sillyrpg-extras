@@ -69,5 +69,13 @@ class PB_PT_main_panel(bpy.types.Panel):
         box.prop(s, "rebuild_interval_ms")
         box.prop(s, "idle_full_rebuild_ms")
 
+        box = layout.box()
+        box.label(text="Facade Asset Modules")
+        box.prop(s, "window_asset")
+        box.prop(s, "door_asset")
+        box.prop(s, "corner_asset")
+        box.prop(s, "balcony_asset")
+        box.prop(s, "service_wall_asset")
+
 
 classes = (PB_PT_main_panel,)
