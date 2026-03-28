@@ -184,3 +184,33 @@ def ensure_materials():
         "glass": get_or_create_material("PB_Addon_Glass", "glass"),
         "accent": get_or_create_material("PB_Addon_Accent", "accent"),
     }
+
+
+def _principled_node(material):
+    if material is None or not material.use_nodes or material.node_tree is None:
+        return None
+    for node in material.node_tree.nodes:
+        if node.type == "BSDF_PRINCIPLED":
+            return node
+    return None
+
+
+def apply_style_material_tuning(materials, style):
+    wall = _principled_node(materials.get("wall"))
+    trim = _principled_node(materials.get("trim"))
+    accent = _principled_node(materials.get("accent"))
+    glass = _principled_node(materials.get("glass"))
+
+    if wall:
+        r, g, b = getattr(style, "wall_tint", (0.91, 0.9, 0.86))
+        wall.inputs["Base Color"].default_value = (r, g, b, 1.0)
+    if trim:
+        r, g, b = getattr(style, "trim_tint", (0.97, 0.97, 0.94))
+        trim.inputs["Base Color"].default_value = (r, g, b, 1.0)
+    if accent:
+        r, g, b = getattr(style, "accent_tint", (0.34, 0.52, 0.68))
+        accent.inputs["Base Color"].default_value = (r, g, b, 1.0)
+    if glass:
+        wall_luma = sum(getattr(style, "wall_tint", (0.91, 0.9, 0.86))) / 3.0
+        glass_tint = 0.58 + wall_luma * 0.12
+        glass.inputs["Base Color"].default_value = (glass_tint, 0.82, 0.96, 0.2)

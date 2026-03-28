@@ -14,6 +14,7 @@ from .utils import (
     ensure_collection,
     ensure_empty,
     ensure_materials,
+    apply_style_material_tuning,
 )
 
 
@@ -72,6 +73,7 @@ class BuildingGenerator:
 
         shape = self.resolve_shape(settings, rebuild_shape)
         style = BuildingStyle.from_settings(settings, self.fast_mode)
+        apply_style_material_tuning(self.mats, style)
         assembler = BuildingAssembler(self.batch, self.col, self.asset_helper_col)
         assembler.assemble(settings, shape, style, root)
 

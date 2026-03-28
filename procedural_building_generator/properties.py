@@ -12,10 +12,10 @@ class PBSettings(bpy.types.PropertyGroup):
     style_preset: EnumProperty(
         name="Style Preset",
         items=(
-            ("SCIENTIST_HOUSING", "ScientistHousing", "High-glazing research district housing"),
-            ("TECHNICIAN_HOUSING", "TechnicianHousing", "Practical mixed service + residential rhythm"),
-            ("SECURITY_HOUSING", "SecurityHousing", "Heavier fortified rhythm with reduced glazing"),
-            ("SERVICE_BLOCK", "ServiceBlock", "Utility-forward block with sparse balconies"),
+            ("SCIENTIST_HOUSING", "Scientist Housing", "Cleaner, lighter housing with high glazing"),
+            ("TECHNICIAN_HOUSING", "Technician Housing", "Practical modular housing with balanced solids/windows"),
+            ("SECURITY_HOUSING", "Security Housing", "Rigid and more solid housing with reduced balconies"),
+            ("SERVICE_RESIDENCE", "Service Residence", "Simple and economical residence with restrained detail"),
         ),
         default="SCIENTIST_HOUSING",
     )

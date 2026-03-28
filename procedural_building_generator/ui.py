@@ -106,6 +106,8 @@ class PB_PT_main_panel(bpy.types.Panel):
         profile_col.label(text=f"Ground: {style.ground_profile.name} / glazing {style.ground_profile.glazing_density:.2f}")
         profile_col.label(text=f"Typical: {style.typical_profile.name} / glazing {style.typical_profile.glazing_density:.2f}")
         profile_col.label(text=f"Top: {style.top_profile.name} / glazing {style.top_profile.glazing_density:.2f}")
+        profile_col.label(text=f"Rhythm: {style.bay_rhythm} / Entrance: {style.entrance_preference}")
+        profile_col.label(text=f"Roof: {style.roof_profile_preference} / Detail: {style.roof_detail_density:.2f}")
 
         box = layout.box()
         box.label(text="Asset Modules", icon='ASSET_MANAGER')
