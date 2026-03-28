@@ -59,58 +59,90 @@ class BuildingAssembler:
 
     def build_outer_walls(self, settings, shape, style, root, floor_profile):
         z_floor = floor_profile.z_floor
+        tile = shape.tile_size
 
-        x = 0.0
-        ix = 0
-        x_slots = int(shape.width_m // shape.tile_size)
-        while x < shape.width_m - 1e-6:
-            cx = x + shape.tile_size * 0.5
+        front_stack = style.facade_stack_for_side(
+            floor_profile,
+            "front",
+            shape.width_m,
+            tile,
+            require_center_entrance=floor_profile.is_ground,
+        )
+        back_stack = style.facade_stack_for_side(floor_profile, "back", shape.width_m, tile)
+        left_stack = style.facade_stack_for_side(floor_profile, "left", shape.depth_m, tile)
+        right_stack = style.facade_stack_for_side(floor_profile, "right", shape.depth_m, tile)
+
+        front_slots = front_stack.slot_modules(tile)
+        back_slots = back_stack.slot_modules(tile)
+        left_slots = left_stack.slot_modules(tile)
+        right_slots = right_stack.slot_modules(tile)
+
+        for ix, (front_module, back_module) in enumerate(zip(front_slots, back_slots)):
+            cx = ix * tile + tile * 0.5
             front_pos = self.local_to_world(shape, root, cx, 0.0, z_floor)
             back_pos = self.local_to_world(shape, root, cx, shape.depth_m, z_floor)
 
-            for face, p, y_sign in (("front", front_pos, -1), ("back", back_pos, +1)):
-                module = style.module_for_slot(floor_profile, face, ix, x_slots)
+            for face, p, y_sign, module in (
+                ("front", front_pos, -1, front_module),
+                ("back", back_pos, +1, back_module),
+            ):
                 wx, wy = p.x, p.y + y_sign * settings.wall_thickness * 0.5
-                if module.kind == "entry":
-                    dw = settings.door_width
-                    dh = settings.door_height
-                    side = (shape.tile_size - dw) * 0.5
-                    if side > 0.05:
-                        self.add_box("trim", side, settings.wall_thickness, dh, (wx - dw * 0.5 - side * 0.5, wy, root.location.z + z_floor + dh * 0.5))
-                        self.add_box("trim", side, settings.wall_thickness, dh, (wx + dw * 0.5 + side * 0.5, wy, root.location.z + z_floor + dh * 0.5))
-                    top_h = settings.floor_height - dh
-                    if top_h > 0.05:
-                        self.add_box("trim", shape.tile_size, settings.wall_thickness, top_h, (wx, wy, root.location.z + z_floor + dh + top_h * 0.5))
-                    self.add_box("glass", dw * 0.9, settings.wall_thickness * 0.35, dh * 0.92, (wx, wy + settings.wall_thickness * 0.12, root.location.z + z_floor + dh * 0.5))
-                elif module.kind == "solid":
-                    self.add_box("wall", shape.tile_size, settings.wall_thickness, settings.floor_height, (wx, wy, root.location.z + z_floor + settings.floor_height * 0.5))
-                else:
-                    outward = +1 if face == "front" else -1
-                    self.add_window_parts(settings, wx, wy, z_floor, module.axis, outward, root)
+                self._build_facade_module(settings, shape, root, z_floor, face, wx, wy, module)
 
-            x += shape.tile_size
-            ix += 1
-
-        y = 0.0
-        iy = 0
-        y_slots = int(shape.depth_m // shape.tile_size)
-        while y < shape.depth_m - 1e-6:
-            cy = y + shape.tile_size * 0.5
+        for iy, (left_module, right_module) in enumerate(zip(left_slots, right_slots)):
+            cy = iy * tile + tile * 0.5
             left_pos = self.local_to_world(shape, root, 0.0, cy, z_floor)
             right_pos = self.local_to_world(shape, root, shape.width_m, cy, z_floor)
 
-            for face, p, x_sign in (("left", left_pos, -1), ("right", right_pos, +1)):
-                module = style.module_for_slot(floor_profile, face, iy, y_slots)
+            for face, p, x_sign, module in (
+                ("left", left_pos, -1, left_module),
+                ("right", right_pos, +1, right_module),
+            ):
                 wx, wy = p.x + x_sign * settings.wall_thickness * 0.5, p.y
-                if module.kind == "solid":
-                    self.add_box("wall", settings.wall_thickness, shape.tile_size, settings.floor_height, (wx, wy, root.location.z + z_floor + settings.floor_height * 0.5))
-                else:
-                    outward = -1 if face == "left" else +1
-                    self.add_window_parts(settings, wx, wy, z_floor, module.axis, outward, root)
+                self._build_facade_module(settings, shape, root, z_floor, face, wx, wy, module)
 
-            y += shape.tile_size
-            iy += 1
+    def _build_facade_module(self, settings, shape, root, z_floor, face, wx, wy, module):
+        module_id = module.id
+        tile = shape.tile_size
+        if module_id == "EntranceDoorModule":
+            dw = settings.door_width
+            dh = settings.door_height
+            side = (tile - dw) * 0.5
+            if side > 0.05:
+                self.add_box("trim", side, settings.wall_thickness, dh, (wx - dw * 0.5 - side * 0.5, wy, root.location.z + z_floor + dh * 0.5))
+                self.add_box("trim", side, settings.wall_thickness, dh, (wx + dw * 0.5 + side * 0.5, wy, root.location.z + z_floor + dh * 0.5))
+            top_h = settings.floor_height - dh
+            if top_h > 0.05:
+                self.add_box("trim", tile, settings.wall_thickness, top_h, (wx, wy, root.location.z + z_floor + dh + top_h * 0.5))
+            self.add_box("glass", dw * 0.9, settings.wall_thickness * 0.35, dh * 0.92, (wx, wy + settings.wall_thickness * 0.12, root.location.z + z_floor + dh * 0.5))
+            return
 
+        if module_id in {"SolidWallModule", "ServiceWallModule", "CornerModule"}:
+            if face in {"front", "back"}:
+                self.add_box("wall", tile, settings.wall_thickness, settings.floor_height, (wx, wy, root.location.z + z_floor + settings.floor_height * 0.5))
+            else:
+                self.add_box("wall", settings.wall_thickness, tile, settings.floor_height, (wx, wy, root.location.z + z_floor + settings.floor_height * 0.5))
+            return
+
+        outward = {
+            "front": +1,
+            "back": -1,
+            "left": -1,
+            "right": +1,
+        }[face]
+        axis = "x" if face in {"front", "back"} else "y"
+        self.add_window_parts(settings, wx, wy, z_floor, axis, outward, root)
+
+        if module_id == "BalconyModule" and face in {"front", "back"}:
+            balcony_depth = max(0.15, settings.wall_thickness * 1.6)
+            y_offset = -balcony_depth * 0.5 if face == "front" else balcony_depth * 0.5
+            self.add_box(
+                "trim",
+                tile * 0.85,
+                balcony_depth,
+                0.08,
+                (wx, wy + y_offset, root.location.z + z_floor + settings.window_sill_h - 0.04),
+            )
     def build_inner_walls(self, settings, shape, root, floor_profile):
         lookup_v = {}
         lookup_h = {}
