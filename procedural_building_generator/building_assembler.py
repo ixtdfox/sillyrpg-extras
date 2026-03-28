@@ -66,8 +66,8 @@ class BuildingAssembler:
         )
         return True
 
-    def _build_roof_silhouette(self, settings, shape, root, roof_z, blocked_rects, rng):
-        profile = getattr(settings, "roof_profile", "RAISED_PARAPET")
+    def _build_roof_silhouette(self, settings, shape, style, root, roof_z, blocked_rects, rng):
+        profile = getattr(style, "roof_profile_preference", getattr(settings, "roof_profile", "RAISED_PARAPET"))
         parapet_h = settings.parapet_height
         parapet_t = settings.parapet_thickness
         if profile == "FLAT":
@@ -120,8 +120,8 @@ class BuildingAssembler:
 
         return parapet_h
 
-    def _build_rooftop_equipment(self, settings, shape, root, roof_z, blocked_rects, rng):
-        density = max(0.0, min(1.0, getattr(settings, "roof_detail_density", 0.5)))
+    def _build_rooftop_equipment(self, settings, shape, style, root, roof_z, blocked_rects, rng):
+        density = max(0.0, min(1.0, getattr(style, "roof_detail_density", getattr(settings, "roof_detail_density", 0.5))))
         amount = max(0, int(getattr(settings, "rooftop_equipment_amount", 0)))
         if density <= 0.01 or amount <= 0:
             return
@@ -183,9 +183,14 @@ class BuildingAssembler:
                 # lightweight panel support for rooftop canopy/panel read
                 self.add_box("trim", sx * 0.9, max(0.04, settings.wall_thickness * 0.2), 0.06, self.local_to_world(shape, root, px, py - sy * 0.18, roof_z + 0.14))
 
-    def _build_top_floor_accents(self, settings, shape, root, roof_z, blocked_rects, rng):
+    def _build_top_floor_accents(self, settings, shape, style, root, roof_z, blocked_rects, rng):
         safe = self._safe_roof_rect(shape, settings)
-        choice = rng.choice(("setback", "canopy", "utility"))
+        if getattr(style, "roof_profile_preference", "RAISED_PARAPET") == "FLAT":
+            choice = rng.choice(("setback", "setback", "utility"))
+        elif getattr(style, "roof_profile_preference", "RAISED_PARAPET") == "STEPPED_PARAPET":
+            choice = rng.choice(("utility", "setback", "utility"))
+        else:
+            choice = rng.choice(("setback", "canopy", "utility"))
         if choice == "setback":
             band_d = max(shape.tile_size * 0.55, shape.depth_m * 0.11)
             rect = (safe[0], safe[1], safe[2], min(safe[3], safe[1] + band_d))
@@ -259,7 +264,7 @@ class BuildingAssembler:
                 ("back", back_pos, +1, back_module),
             ):
                 wx, wy = p.x, p.y + y_sign * settings.wall_thickness * 0.5
-                self._build_facade_module(settings, shape, root, z_floor, face, wx, wy, module)
+                self._build_facade_module(settings, shape, style, root, z_floor, face, wx, wy, module)
 
         for iy, (left_module, right_module) in enumerate(zip(left_slots, right_slots)):
             cy = iy * tile + tile * 0.5
@@ -271,30 +276,30 @@ class BuildingAssembler:
                 ("right", right_pos, +1, right_module),
             ):
                 wx, wy = p.x + x_sign * settings.wall_thickness * 0.5, p.y
-                self._build_facade_module(settings, shape, root, z_floor, face, wx, wy, module)
+                self._build_facade_module(settings, shape, style, root, z_floor, face, wx, wy, module)
 
-        self._build_horizontal_accents(settings, shape, floor_profile, root)
-        self._build_vertical_accents(settings, shape, floor_profile, root, front_slots, back_slots, left_slots, right_slots)
+        self._build_horizontal_accents(settings, shape, style, floor_profile, root)
+        self._build_vertical_accents(settings, shape, style, floor_profile, root, front_slots, back_slots, left_slots, right_slots)
 
-    def _build_facade_module(self, settings, shape, root, z_floor, face, wx, wy, module):
+    def _build_facade_module(self, settings, shape, style, root, z_floor, face, wx, wy, module):
         module_id = module.id
         tile = shape.tile_size
         if self._place_asset_module(settings, module_id, face, wx, wy, root.location.z + z_floor):
             return
 
         if module_id == "EntranceDoorModule":
-            self._build_entrance_module(settings, root, z_floor, face, wx, wy, tile)
+            self._build_entrance_module(settings, style, root, z_floor, face, wx, wy, tile)
             return
 
         if module_id in {"SolidWallModule", "ServiceWallModule", "CornerModule", "SolidWallBayModule", "ServiceBayModule"}:
             self._build_full_wall(face, settings, tile, wx, wy, root.location.z + z_floor)
             if module_id == "ServiceBayModule":
-                self._build_service_bay_overlay(face, settings, tile, wx, wy, root.location.z + z_floor)
+                self._build_service_bay_overlay(face, settings, style, tile, wx, wy, root.location.z + z_floor)
             return
 
         if module_id == "RecessedStripModule":
             self._build_full_wall(face, settings, tile, wx, wy, root.location.z + z_floor)
-            self._build_recessed_strip(face, settings, tile, wx, wy, root.location.z + z_floor)
+            self._build_recessed_strip(face, settings, style, tile, wx, wy, root.location.z + z_floor)
             return
 
         if module_id == "AccentPanelModule":
@@ -327,7 +332,7 @@ class BuildingAssembler:
         self.add_window_parts(settings, wx, wy, z_floor, axis, outward, root)
 
         if module_id == "BalconyModule" and face in {"front", "back"}:
-            self._build_balcony_variant(settings, root, z_floor, face, wx, wy, tile)
+            self._build_balcony_variant(settings, style, root, z_floor, face, wx, wy, tile)
 
     def _build_window_variant(self, settings, root, z_floor, face, wx, wy, width_factor: float, sill_offset: float):
         local = type("VariantSettings", (), {})()
@@ -346,18 +351,18 @@ class BuildingAssembler:
         else:
             self.add_box("wall", settings.wall_thickness, tile, settings.floor_height, (wx, wy, z_floor_world + settings.floor_height * 0.5))
 
-    def _build_service_bay_overlay(self, face, settings, tile, wx, wy, z_floor_world):
-        panel_h = settings.floor_height * 0.34
+    def _build_service_bay_overlay(self, face, settings, style, tile, wx, wy, z_floor_world):
+        panel_h = settings.floor_height * (0.3 + getattr(style, "accent_strength", 0.5) * 0.16)
         panel_z = z_floor_world + settings.window_sill_h + panel_h * 0.55
         if face in {"front", "back"}:
             self.add_box("trim", tile * 0.82, settings.wall_thickness * 0.4, panel_h, (wx, wy, panel_z))
         else:
             self.add_box("trim", settings.wall_thickness * 0.4, tile * 0.82, panel_h, (wx, wy, panel_z))
 
-    def _build_recessed_strip(self, face, settings, tile, wx, wy, z_floor_world):
+    def _build_recessed_strip(self, face, settings, style, tile, wx, wy, z_floor_world):
         strip_h = settings.floor_height * 0.8
         strip_z = z_floor_world + settings.floor_height * 0.52
-        recess = settings.wall_thickness * 0.25
+        recess = settings.wall_thickness * (0.18 + getattr(style, "vertical_fins", 0.5) * 0.2)
         if face == "front":
             self.add_box("trim", tile * 0.26, settings.wall_thickness * 0.2, strip_h, (wx, wy + recess, strip_z))
         elif face == "back":
@@ -367,13 +372,13 @@ class BuildingAssembler:
         else:
             self.add_box("trim", settings.wall_thickness * 0.2, tile * 0.26, strip_h, (wx - recess, wy, strip_z))
 
-    def _build_entrance_module(self, settings, root, z_floor, face, wx, wy, tile):
+    def _build_entrance_module(self, settings, style, root, z_floor, face, wx, wy, tile):
         dw = settings.door_width
         dh = settings.door_height
-        style = getattr(settings, "entrance_style", "RECESSED")
-        recess_depth = settings.wall_thickness * (1.4 if style in {"RECESSED", "BOLD"} else 0.55)
-        canopy_factor = 0.25 if style == "FLAT" else (0.65 if style == "RECESSED" else 0.9)
-        frame_factor = 0.2 if style == "FLAT" else (0.6 if style == "RECESSED" else 0.85)
+        entry_style = getattr(style, "entrance_preference", getattr(settings, "entrance_style", "RECESSED"))
+        recess_depth = settings.wall_thickness * (1.4 if entry_style in {"RECESSED", "BOLD"} else 0.55)
+        canopy_factor = 0.25 if entry_style == "FLAT" else (0.65 if entry_style == "RECESSED" else 0.9)
+        frame_factor = 0.2 if entry_style == "FLAT" else (0.6 if entry_style == "RECESSED" else 0.85)
         depth_sign = -1.0 if face == "front" else 1.0
         door_plane_y = wy + depth_sign * recess_depth
 
@@ -403,12 +408,13 @@ class BuildingAssembler:
                 (wx, wy + depth_sign * depth * 0.5, root.location.z + z_floor + min(settings.floor_height - 0.1, settings.canopy_height)),
             )
 
-    def _build_balcony_variant(self, settings, root, z_floor, face, wx, wy, tile):
+    def _build_balcony_variant(self, settings, style, root, z_floor, face, wx, wy, tile):
         style_seed = int(settings.seed) * 237 + int(round((wx + wy + z_floor) * 10.0))
         rng = math.fmod(style_seed * 0.61803398875, 1.0)
-        is_projecting = rng > 0.45
+        balcony_bias = getattr(style, "balcony_preference", 0.4)
+        is_projecting = rng > (0.68 - balcony_bias * 0.32)
         if is_projecting:
-            depth = max(0.18, settings.wall_thickness * 2.2)
+            depth = max(0.12, settings.wall_thickness * (1.4 + balcony_bias * 1.6))
             y_offset = -depth * 0.5 if face == "front" else depth * 0.5
             self.add_box("trim", tile * 0.9, depth, 0.09, (wx, wy + y_offset, root.location.z + z_floor + settings.window_sill_h - 0.05))
             rail_h = 0.82
@@ -418,10 +424,10 @@ class BuildingAssembler:
             rail_y = wy + (-settings.wall_thickness * 0.45 if face == "front" else settings.wall_thickness * 0.45)
             self.add_box("trim", tile * 0.76, settings.wall_thickness * 0.26, rail_h, (wx, rail_y, root.location.z + z_floor + settings.window_sill_h + rail_h * 0.5))
 
-    def _build_horizontal_accents(self, settings, shape, floor_profile, root):
+    def _build_horizontal_accents(self, settings, shape, style, floor_profile, root):
         z_floor = floor_profile.z_floor
-        band_density = getattr(settings, "band_density", 0.5)
-        strength = getattr(settings, "accent_strength", 0.5)
+        band_density = getattr(style, "band_density", getattr(settings, "band_density", 0.5))
+        strength = getattr(style, "accent_strength", getattr(settings, "accent_strength", 0.5))
         if band_density <= 0.01 and strength <= 0.01:
             return
         band_t = settings.wall_thickness * (0.22 + strength * 0.48)
@@ -442,8 +448,8 @@ class BuildingAssembler:
         self.add_box(group, thickness, shape.depth_m, h, self.local_to_world(shape, root, 0.0, shape.depth_m * 0.5, z))
         self.add_box(group, thickness, shape.depth_m, h, self.local_to_world(shape, root, shape.width_m, shape.depth_m * 0.5, z))
 
-    def _build_vertical_accents(self, settings, shape, floor_profile, root, front_slots, back_slots, left_slots, right_slots):
-        fin_strength = getattr(settings, "vertical_fins", 0.45)
+    def _build_vertical_accents(self, settings, shape, style, floor_profile, root, front_slots, back_slots, left_slots, right_slots):
+        fin_strength = getattr(style, "vertical_fins", getattr(settings, "vertical_fins", 0.45))
         if fin_strength <= 0.01:
             return
         z = floor_profile.z_floor + settings.floor_height * 0.5
@@ -642,6 +648,6 @@ class BuildingAssembler:
         roof_z = shape.floors * settings.floor_height
         blocked_rects = [shape.stair_opening]
         rng = random.Random((int(settings.seed) * 73856093) ^ (shape.floors * 19349663) ^ int(shape.width_m * 100) ^ (int(shape.depth_m * 100) << 1))
-        self._build_roof_silhouette(settings, shape, root, roof_z, blocked_rects, rng)
-        self._build_rooftop_equipment(settings, shape, root, roof_z, blocked_rects, rng)
-        self._build_top_floor_accents(settings, shape, root, roof_z, blocked_rects, rng)
+        self._build_roof_silhouette(settings, shape, style, root, roof_z, blocked_rects, rng)
+        self._build_rooftop_equipment(settings, shape, style, root, roof_z, blocked_rects, rng)
+        self._build_top_floor_accents(settings, shape, style, root, roof_z, blocked_rects, rng)

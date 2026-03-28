@@ -82,6 +82,15 @@ class BuildingStyle:
     entrance_style: str
     balcony_floor_mask: tuple[bool, ...]
     preset: str
+    bay_rhythm: str
+    glazing_bias: float
+    balcony_preference: float
+    entrance_preference: str
+    roof_profile_preference: str
+    roof_detail_density: float
+    wall_tint: tuple[float, float, float]
+    trim_tint: tuple[float, float, float]
+    accent_tint: tuple[float, float, float]
     ground_profile: GroundFloorProfile
     typical_profile: TypicalFloorProfile
     top_profile: TopFloorProfile
@@ -90,23 +99,41 @@ class BuildingStyle:
     def from_settings(cls, settings, fast_mode: bool) -> "BuildingStyle":
         side_prob = 0.45 if fast_mode else 0.7
         preset = str(getattr(settings, "style_preset", "SCIENTIST_HOUSING"))
+        if preset == "SERVICE_BLOCK":
+            preset = "SERVICE_RESIDENCE"
+        preset_data = cls._preset_controls(preset)
         ground, typical, top = cls._preset_profiles(preset)
+        facade_variation = cls._clamp01(float(getattr(settings, "facade_variation", settings.detail_amount)) * 0.55 + preset_data["facade_variation"] * 0.45)
+        accent_strength = cls._clamp01(float(getattr(settings, "accent_strength", settings.detail_amount)) * 0.5 + preset_data["accent_strength"] * 0.5)
+        band_density = cls._clamp01(float(getattr(settings, "band_density", settings.detail_amount)) * 0.5 + preset_data["band_density"] * 0.5)
+        vertical_fins = cls._clamp01(float(getattr(settings, "vertical_fins", settings.detail_amount)) * 0.45 + preset_data["vertical_fins"] * 0.55)
+        roof_density = cls._clamp01(float(getattr(settings, "roof_detail_density", 0.55)) * 0.55 + preset_data["roof_detail_density"] * 0.45)
+        balcony_density = cls._clamp01(float(getattr(settings, "balcony_chance", 0.45)) * 0.35 + preset_data["balcony_preference"] * 0.65)
         return cls(
             seed=int(settings.seed),
             side_window_probability=side_prob,
             roof_rule=int(settings.roof_style),
             accent_preference=float(settings.detail_amount),
-            facade_variation=float(getattr(settings, "facade_variation", settings.detail_amount)),
-            accent_strength=float(getattr(settings, "accent_strength", settings.detail_amount)),
-            band_density=float(getattr(settings, "band_density", settings.detail_amount)),
-            vertical_fins=float(getattr(settings, "vertical_fins", settings.detail_amount)),
+            facade_variation=facade_variation,
+            accent_strength=accent_strength,
+            band_density=band_density,
+            vertical_fins=vertical_fins,
             entrance_style=str(getattr(settings, "entrance_style", "RECESSED")),
             balcony_floor_mask=cls._balcony_floor_mask(
                 floors=int(settings.floors),
                 seed=int(settings.seed),
-                density=float(getattr(settings, "facade_variation", settings.detail_amount)),
+                density=balcony_density,
             ),
             preset=preset,
+            bay_rhythm=str(preset_data["bay_rhythm"]),
+            glazing_bias=float(preset_data["glazing_bias"]),
+            balcony_preference=balcony_density,
+            entrance_preference=str(preset_data["entrance_style"]),
+            roof_profile_preference=str(preset_data["roof_profile"]),
+            roof_detail_density=roof_density,
+            wall_tint=tuple(preset_data["wall_tint"]),
+            trim_tint=tuple(preset_data["trim_tint"]),
+            accent_tint=tuple(preset_data["accent_tint"]),
             ground_profile=ground,
             typical_profile=typical,
             top_profile=top,
@@ -239,15 +266,27 @@ class BuildingStyle:
     ) -> float:
         probability = base_probability
         if module.id in {"StandardWindowModule", "NarrowWindowBayModule", "WideWindowBayModule"}:
-            probability *= floor_profile.glazing_density
+            probability *= floor_profile.glazing_density * self.glazing_bias
             if face in {"left", "right"}:
                 probability *= self.side_window_probability
             if module.id == "NarrowWindowBayModule":
-                probability *= 0.7 + self.facade_variation * 0.9
+                rhythm_scale = {
+                    "FINE": 1.25,
+                    "MODULAR": 1.05,
+                    "RIGID": 0.9,
+                    "ECONOMY": 0.95,
+                }.get(self.bay_rhythm, 1.0)
+                probability *= (0.7 + self.facade_variation * 0.9) * rhythm_scale
             elif module.id == "WideWindowBayModule":
-                probability *= 0.55 + self.facade_variation * 1.1
+                rhythm_scale = {
+                    "FINE": 1.15,
+                    "MODULAR": 1.0,
+                    "RIGID": 0.72,
+                    "ECONOMY": 0.8,
+                }.get(self.bay_rhythm, 1.0)
+                probability *= (0.55 + self.facade_variation * 1.1) * rhythm_scale
         elif module.id == "BalconyModule":
-            probability *= floor_profile.balcony_allowance
+            probability *= floor_profile.balcony_allowance * (0.35 + self.balcony_preference * 1.1)
             if face in {"left", "right"}:
                 probability *= 0.45
             if not self._is_balcony_floor_allowed(floor.floor_index):
@@ -344,7 +383,7 @@ class BuildingStyle:
                     accent=0.45,
                 ),
             ),
-            "SERVICE_BLOCK": cls._make_profiles(
+            "SERVICE_RESIDENCE": cls._make_profiles(
                 ground=dict(
                     allowed=("SolidWallModule", "SolidWallBayModule", "ServiceWallModule", "ServiceBayModule", "StandardWindowModule", "NarrowWindowBayModule", "AccentPanelModule", "RecessedStripModule"),
                     probs={"ServiceWallModule": 0.28, "ServiceBayModule": 0.17, "SolidWallModule": 0.2, "SolidWallBayModule": 0.14, "StandardWindowModule": 0.14, "NarrowWindowBayModule": 0.04, "AccentPanelModule": 0.03},
@@ -369,6 +408,76 @@ class BuildingStyle:
             ),
         }
         return presets.get(preset, presets["SCIENTIST_HOUSING"])
+
+    @classmethod
+    def _preset_controls(cls, preset: str) -> dict:
+        controls = {
+            "SCIENTIST_HOUSING": dict(
+                bay_rhythm="FINE",
+                glazing_bias=1.18,
+                facade_variation=0.74,
+                accent_strength=0.62,
+                balcony_preference=0.52,
+                entrance_style="RECESSED",
+                roof_profile="RAISED_PARAPET",
+                roof_detail_density=0.68,
+                band_density=0.62,
+                vertical_fins=0.66,
+                wall_tint=(0.97, 0.98, 1.0),
+                trim_tint=(0.95, 0.98, 1.0),
+                accent_tint=(0.48, 0.71, 0.88),
+            ),
+            "TECHNICIAN_HOUSING": dict(
+                bay_rhythm="MODULAR",
+                glazing_bias=0.95,
+                facade_variation=0.58,
+                accent_strength=0.46,
+                balcony_preference=0.32,
+                entrance_style="RECESSED",
+                roof_profile="ACCESS_VOLUME",
+                roof_detail_density=0.72,
+                band_density=0.56,
+                vertical_fins=0.5,
+                wall_tint=(0.9, 0.91, 0.9),
+                trim_tint=(0.82, 0.85, 0.86),
+                accent_tint=(0.43, 0.56, 0.68),
+            ),
+            "SECURITY_HOUSING": dict(
+                bay_rhythm="RIGID",
+                glazing_bias=0.78,
+                facade_variation=0.42,
+                accent_strength=0.58,
+                balcony_preference=0.08,
+                entrance_style="BOLD",
+                roof_profile="STEPPED_PARAPET",
+                roof_detail_density=0.46,
+                band_density=0.7,
+                vertical_fins=0.82,
+                wall_tint=(0.83, 0.84, 0.85),
+                trim_tint=(0.72, 0.74, 0.77),
+                accent_tint=(0.32, 0.41, 0.52),
+            ),
+            "SERVICE_RESIDENCE": dict(
+                bay_rhythm="ECONOMY",
+                glazing_bias=0.84,
+                facade_variation=0.38,
+                accent_strength=0.28,
+                balcony_preference=0.12,
+                entrance_style="FLAT",
+                roof_profile="FLAT",
+                roof_detail_density=0.34,
+                band_density=0.3,
+                vertical_fins=0.24,
+                wall_tint=(0.89, 0.88, 0.85),
+                trim_tint=(0.79, 0.78, 0.75),
+                accent_tint=(0.45, 0.49, 0.53),
+            ),
+        }
+        return controls.get(preset, controls["SCIENTIST_HOUSING"])
+
+    @staticmethod
+    def _clamp01(value: float) -> float:
+        return max(0.0, min(1.0, value))
 
     @classmethod
     def _make_profiles(cls, ground: dict, typical: dict, top: dict) -> tuple[GroundFloorProfile, TypicalFloorProfile, TopFloorProfile]:
