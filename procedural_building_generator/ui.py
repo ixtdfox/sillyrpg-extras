@@ -7,20 +7,23 @@ from .building_style import BuildingStyle
 def _active_mode(settings):
     has_any_asset = any((
         settings.window_asset,
-        settings.door_asset,
+        settings.entrance_asset,
         settings.corner_asset,
         settings.balcony_asset,
-        settings.service_wall_asset,
+        settings.rooftop_utility_asset,
     ))
+    mode = getattr(settings, "facade_module_mode", "HYBRID")
+    if mode == "PROCEDURAL_ONLY":
+        return "procedural-only"
     if has_any_asset:
         if all((
             settings.window_asset,
-            settings.door_asset,
+            settings.entrance_asset,
             settings.corner_asset,
             settings.balcony_asset,
-            settings.service_wall_asset,
+            settings.rooftop_utility_asset,
         )):
-            return "asset-driven"
+            return "asset-preferred"
         return "hybrid"
     return "primitive"
 
@@ -116,12 +119,13 @@ class PB_PT_main_panel(bpy.types.Panel):
 
         box = layout.box()
         box.label(text="Asset Modules", icon='ASSET_MANAGER')
+        box.prop(s, "facade_module_mode")
         for prop, label in (
             ("window_asset", "Window Asset"),
-            ("door_asset", "Door Asset"),
+            ("entrance_asset", "Entrance Asset"),
             ("corner_asset", "Corner Asset"),
             ("balcony_asset", "Balcony Asset"),
-            ("service_wall_asset", "Service Wall Asset"),
+            ("rooftop_utility_asset", "Rooftop Utility Asset"),
         ):
             row = box.row(align=True)
             row.prop(s, prop, text=label)
