@@ -77,7 +77,12 @@ class PB_PT_main_panel(bpy.types.Panel):
         box.label(text="Style Preset", icon='SHADING_RENDERED')
         box.prop(s, "style_preset")
         box.prop(s, "detail_amount")
+        box.prop(s, "facade_variation")
+        box.prop(s, "accent_strength")
         box.prop(s, "balcony_chance")
+        box.prop(s, "band_density")
+        box.prop(s, "vertical_fins")
+        box.prop(s, "entrance_style")
         box.prop(s, "roof_style")
 
         box = layout.box()

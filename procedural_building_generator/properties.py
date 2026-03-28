@@ -20,6 +20,19 @@ class PBSettings(bpy.types.PropertyGroup):
         default="SCIENTIST_HOUSING",
     )
     balcony_chance: FloatProperty(name="Balconies", default=0.45, min=0.0, max=1.0)
+    facade_variation: FloatProperty(name="Facade Variation", default=0.65, min=0.0, max=1.0)
+    accent_strength: FloatProperty(name="Accent Strength", default=0.55, min=0.0, max=1.0)
+    entrance_style: EnumProperty(
+        name="Entrance Style",
+        items=(
+            ("RECESSED", "Recessed", "Central recessed entrance with stronger portal reads"),
+            ("FLAT", "Flat", "Flush entrance with minimal recess"),
+            ("BOLD", "Bold", "Recessed entrance with higher chance of canopy and side frames"),
+        ),
+        default="RECESSED",
+    )
+    band_density: FloatProperty(name="Band Density", default=0.5, min=0.0, max=1.0)
+    vertical_fins: FloatProperty(name="Vertical Fins", default=0.45, min=0.0, max=1.0)
     roof_style: IntProperty(name="Roof Style", default=1, min=0, max=2)
     tile_size: FloatProperty(name="Tile Size", default=2.0, min=1.0)
     floor_height: FloatProperty(name="Floor Height", default=2.8, min=2.2)
