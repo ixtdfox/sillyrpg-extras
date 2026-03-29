@@ -46,15 +46,6 @@ class MeshBatcher:
                     print("Overlapping geometry detected in facade module; skipping intersecting box")
                     self._reported_overlap = True
                 return False
-            coplanar_x = abs(x1 - ox0) <= eps or abs(ox1 - x0) <= eps
-            coplanar_y = abs(y1 - oy0) <= eps or abs(oy1 - y0) <= eps
-            coplanar_z = abs(z1 - oz0) <= eps or abs(oz1 - z0) <= eps
-            touching_axes = int(coplanar_x) + int(coplanar_y) + int(coplanar_z)
-            if touching_axes == 1 and (ix > eps or iy > eps or iz > eps):
-                if group == other_group and not self._reported_overlap:
-                    print("Nearly coplanar overlap detected in facade module; skipping box")
-                    self._reported_overlap = True
-                return False
         return True
 
     @staticmethod
