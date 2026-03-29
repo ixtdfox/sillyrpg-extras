@@ -24,6 +24,8 @@ _LAST_CHANGE_TS = 0.0
 _LAST_REBUILD_TS = 0.0
 _LAST_QUALITY = None
 _TIMER_INSTALLED = False
+_PENDING_FULL_REBUILD = False
+_PENDING_SHAPE_REBUILD = False
 
 
 def read_controller_sig():
@@ -115,6 +117,7 @@ def timer_should_pause():
 
 def proc_building_timer():
     global _LAST_CONTROLLER_SIG, _LAST_SHAPE_SIG, _LAST_STYLE_SIG, _LAST_CHANGE_TS, _LAST_REBUILD_TS, _LAST_QUALITY
+    global _PENDING_FULL_REBUILD, _PENDING_SHAPE_REBUILD
 
     scene = bpy.context.scene
     if not hasattr(scene, "pb_settings"):
@@ -129,41 +132,73 @@ def proc_building_timer():
     now = time.perf_counter()
     s = scene.pb_settings
 
-    pause_reason = timer_pause_reason()
-    s.pb_timer_pause_reason = pause_reason or "running"
-    if pause_reason:
-        return 0.12
-
     controller_changed = controller_sig != _LAST_CONTROLLER_SIG
     shape_changed = shape_sig != _LAST_SHAPE_SIG
     style_changed = style_sig != _LAST_STYLE_SIG
     if controller_changed or shape_changed or style_changed:
         _LAST_CHANGE_TS = now
+        _PENDING_FULL_REBUILD = True
+        _PENDING_SHAPE_REBUILD = bool(controller_changed or shape_changed)
+        if controller_changed or shape_changed:
+            s.pb_timer_pause_reason = "preview rebuild completed; full rebuild queued"
+        elif style_changed:
+            s.pb_timer_pause_reason = "style change queued"
+
+    hard_pause = ""
+    if bpy.context.mode != 'OBJECT':
+        hard_pause = "non-object mode"
+    elif not s.auto_rebuild:
+        hard_pause = "auto rebuild paused"
+
+    generated_selected = active_generated_object_selected()
+    if hard_pause:
+        s.pb_timer_pause_reason = hard_pause
+        return 0.12
 
     time_since_change_ms = (now - _LAST_CHANGE_TS) * 1000.0
     time_since_rebuild_ms = (now - _LAST_REBUILD_TS) * 1000.0
 
-    quality = "full"
-    if s.interactive_preview and controller_changed:
-        quality = "preview"
-    elif s.interactive_preview and time_since_change_ms < s.idle_full_rebuild_ms and _LAST_QUALITY == "preview":
-        quality = "preview"
-
     if time_since_rebuild_ms >= s.rebuild_interval_ms:
-        quality_changed = quality != _LAST_QUALITY
-        should_rebuild = controller_changed or shape_changed or style_changed or (quality_changed and time_since_change_ms >= s.rebuild_interval_ms)
-        if should_rebuild:
+        # Fast preview pass while dragging controllers, but don't force it when
+        # generated object is selected (selection-safe behavior).
+        if (
+            s.interactive_preview
+            and controller_changed
+            and not generated_selected
+        ):
             try:
-                style_only_change = style_changed and not (controller_changed or shape_changed or quality_changed)
-                BuildingGenerator().build(quality, rebuild_shape=not style_only_change)
+                BuildingGenerator().build("preview", rebuild_shape=True)
+                _LAST_REBUILD_TS = now
+                _LAST_QUALITY = "preview"
+                s.pb_last_rebuild_quality = "preview"
+                print("preview rebuild completed; full rebuild queued")
+            except Exception as e:
+                print("Proc building preview rebuild failed:", e)
+
+        # Always honor queued full rebuild after idle, even if a generated
+        # object remains selected from previous output.
+        if _PENDING_FULL_REBUILD and time_since_change_ms >= s.idle_full_rebuild_ms:
+            try:
+                style_only_change = (not _PENDING_SHAPE_REBUILD) and style_changed and not (controller_changed or shape_changed)
+                BuildingGenerator().build("full", rebuild_shape=not style_only_change)
                 _LAST_CONTROLLER_SIG = controller_sig
                 _LAST_SHAPE_SIG = shape_sig
                 _LAST_STYLE_SIG = style_sig
                 _LAST_REBUILD_TS = now
-                _LAST_QUALITY = quality
-                s.pb_last_rebuild_quality = quality
+                _LAST_QUALITY = "full"
+                _PENDING_FULL_REBUILD = False
+                _PENDING_SHAPE_REBUILD = False
+                s.pb_last_rebuild_quality = "full"
+                s.pb_timer_pause_reason = "full rebuild executed after idle"
+                print("full rebuild executed after idle")
             except Exception as e:
-                print("Proc building rebuild failed:", e)
+                print("Proc building full rebuild failed:", e)
+        elif generated_selected and _PENDING_FULL_REBUILD:
+            s.pb_timer_pause_reason = "timer paused because generated object selected, but pending full rebuild preserved"
+        elif generated_selected:
+            s.pb_timer_pause_reason = "generated object selected"
+        elif not _PENDING_FULL_REBUILD:
+            s.pb_timer_pause_reason = "running"
 
     return 0.08 if s.interactive_preview else 0.15
 
