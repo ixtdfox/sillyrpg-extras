@@ -6,8 +6,6 @@ from .utils import GENERATOR_TAG, world_box
 
 
 class MeshBatcher:
-    _INTENTIONAL_OVERLAP_GROUPS = {"wall", "roof"}
-
     def __init__(self):
         self.data = {}
         self._bbox_records = []
@@ -24,9 +22,7 @@ class MeshBatcher:
             cy + sy * 0.5,
             cz + sz * 0.5,
         )
-        if not self._debug_overlap_check(group, bbox):
-            self._skipped_overlaps += 1
-            return
+        self._debug_overlap_check(group, bbox)
         verts, faces = world_box(sx, sy, sz, center)
         if group not in self.data:
             self.data[group] = {"verts": [], "faces": []}
@@ -36,8 +32,6 @@ class MeshBatcher:
         self._bbox_records.append((group, bbox))
 
     def _debug_overlap_check(self, group, bbox):
-        if group in self._INTENTIONAL_OVERLAP_GROUPS:
-            return True
         eps = 0.0005
         x0, y0, z0, x1, y1, z1 = bbox
         for other_group, other in self._bbox_records[-240:]:
@@ -47,10 +41,9 @@ class MeshBatcher:
             iz = min(z1, oz1) - max(z0, oz0)
             if ix > eps and iy > eps and iz > eps:
                 if not self._reported_overlap:
-                    print("Overlapping geometry detected in facade module; skipping intersecting box")
+                    print("Overlapping geometry detected in facade module")
                     self._reported_overlap = True
-                return False
-        return True
+                return
 
     @staticmethod
     def _remove_duplicate_faces(bm):
@@ -83,14 +76,6 @@ class MeshBatcher:
             self._remove_duplicate_faces(bm)
             self._remove_internal_faces(bm)
             bmesh.ops.dissolve_degenerate(bm, edges=bm.edges, dist=1e-6)
-            if bm.faces:
-                bmesh.ops.dissolve_limit(
-                    bm,
-                    angle_limit=0.0005,
-                    use_dissolve_boundaries=False,
-                    verts=bm.verts,
-                    edges=bm.edges,
-                )
             bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
             bm.to_mesh(mesh)
             bm.free()

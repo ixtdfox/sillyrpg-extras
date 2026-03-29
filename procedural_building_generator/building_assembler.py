@@ -459,27 +459,17 @@ class BuildingAssembler:
             self.add_box("trim", depth, tile * 0.82, panel_h, (ox, oy, panel_z))
 
     def _build_recessed_strip(self, face, settings, style, tile, wx, wy, z_floor_world):
-        strip_depth = max(settings.wall_thickness * 0.28, self.SURFACE_EPSILON * 2.0)
-        strip_width = tile * 0.26
-        side_w = max(0.01, (tile - strip_width) * 0.5)
-        side_offset = (strip_width + side_w) * 0.5
+        self._build_full_wall(face, settings, tile, wx, wy, z_floor_world)
+        strip_depth = max(settings.wall_thickness * 0.32, self.SURFACE_EPSILON * 2.2)
+        strip_width = tile * 0.2
+        strip_h = settings.floor_height * 0.82
+        strip_z = z_floor_world + settings.floor_height * 0.5
+        offset = settings.wall_thickness * 0.5 + strip_depth * 0.5 + self.SURFACE_EPSILON
+        ox, oy = self._offset_on_face(face, wx, wy, offset)
         if face in {"front", "back"}:
-            self._build_full_wall(face, settings, side_w, wx - side_offset, wy, z_floor_world)
-            self._build_full_wall(face, settings, side_w, wx + side_offset, wy, z_floor_world)
+            self.add_box("trim", strip_width, strip_depth, strip_h, (ox, oy, strip_z))
         else:
-            self._build_full_wall(face, settings, side_w, wx, wy - side_offset, z_floor_world)
-            self._build_full_wall(face, settings, side_w, wx, wy + side_offset, z_floor_world)
-        strip_h = settings.floor_height * 0.8
-        strip_z = z_floor_world + settings.floor_height * 0.52
-        recess = settings.wall_thickness * 0.5 - strip_depth * 0.5 - self.SURFACE_EPSILON
-        if face == "front":
-            self.add_box("trim", strip_width, strip_depth, strip_h, (wx, wy + recess, strip_z))
-        elif face == "back":
-            self.add_box("trim", strip_width, strip_depth, strip_h, (wx, wy - recess, strip_z))
-        elif face == "left":
-            self.add_box("trim", strip_depth, strip_width, strip_h, (wx + recess, wy, strip_z))
-        else:
-            self.add_box("trim", strip_depth, strip_width, strip_h, (wx - recess, wy, strip_z))
+            self.add_box("trim", strip_depth, strip_width, strip_h, (ox, oy, strip_z))
 
     def _build_accent_panel_module(self, face, settings, style, tile, wx, wy, z_floor_world):
         self._build_full_wall(face, settings, tile, wx, wy, z_floor_world)
