@@ -21,12 +21,13 @@ class PBSettings(bpy.types.PropertyGroup):
     style_preset: EnumProperty(
         name="Style Preset",
         items=(
-            ("SCIENTIST_HOUSING", "Scientist Housing", "Cleaner, lighter housing with high glazing"),
-            ("TECHNICIAN_HOUSING", "Technician Housing", "Practical modular housing with balanced solids/windows"),
-            ("SECURITY_HOUSING", "Security Housing", "Rigid and more solid housing with reduced balconies"),
+            ("MINIMAL_MODERN_VILLA", "Minimal Modern Villa", "Offset multi-volume villa with strong glazing accents"),
+            ("COMPACT_URBAN_HOUSE", "Compact Urban House", "Dense low-rise composition with restrained overhangs"),
+            ("TERRACE_HOUSE", "Terrace House", "Terrace-oriented composition with upper setbacks"),
+            ("SECURITY_RESIDENCE", "Security Residence", "Restrained, solid-forward residence with controlled openings"),
             ("SERVICE_RESIDENCE", "Service Residence", "Simple and economical residence with restrained detail"),
         ),
-        default="SCIENTIST_HOUSING",
+        default="MINIMAL_MODERN_VILLA",
     )
     material_palette: EnumProperty(
         name="Material Palette",
@@ -49,11 +50,12 @@ class PBSettings(bpy.types.PropertyGroup):
     entrance_style: EnumProperty(
         name="Entrance Style",
         items=(
-            ("RECESSED", "Recessed", "Central recessed entrance with stronger portal reads"),
-            ("FLAT", "Flat", "Flush entrance with minimal recess"),
-            ("BOLD", "Bold", "Recessed entrance with higher chance of canopy and side frames"),
+            ("RECESSED_ENTRY", "Recessed Entry", "Deeper reveal entry integrated into a dedicated entrance block"),
+            ("FRAMED_PORTAL", "Framed Portal", "Stronger portal frame with architectural side reveals"),
+            ("CANOPY_COLUMNS", "Canopy + Columns", "Entry canopy and slim supports for a modern forecourt read"),
+            ("STAIR_REVEAL", "Stair Reveal", "Raised entry with deeper reveal and layered threshold"),
         ),
-        default="RECESSED",
+        default="RECESSED_ENTRY",
     )
     band_density: FloatProperty(name="Band Density", default=0.5, min=0.0, max=1.0)
     vertical_fins: FloatProperty(name="Vertical Fins", default=0.45, min=0.0, max=1.0)

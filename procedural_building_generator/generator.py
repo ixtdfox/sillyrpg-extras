@@ -50,7 +50,7 @@ class BuildingGenerator:
             int(settings.floors), int(settings.room_count), int(settings.seed),
             round(settings.tile_size, 4), round(settings.floor_height, 4),
             round(settings.slab_thickness, 4), round(settings.stairs_width, 4),
-            round(settings.stair_opening_margin, 4), bool(fast_mode),
+            round(settings.stair_opening_margin, 4), str(getattr(settings, 'style_preset', '')), bool(fast_mode),
         )
 
     def resolve_shape(self, settings, rebuild_shape):

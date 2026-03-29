@@ -62,6 +62,33 @@ class BuildingAssembler:
             sy = y1 - y0
             self.add_box(group, sx, sy, thickness, self.local_to_world(shape, root, x1 + sx * 0.5, y0 + sy * 0.5, z_center))
 
+    def _add_volume_shell(self, shape, root, block, z0, floors, settings):
+        if floors <= 0:
+            return
+        h = floors * settings.floor_height
+        cx = (block.x0 + block.x1) * 0.5
+        cy = (block.y0 + block.y1) * 0.5
+        self.add_box("wall", block.x1 - block.x0, block.y1 - block.y0, h, self.local_to_world(shape, root, cx, cy, z0 + h * 0.5))
+        self.add_box("roof", block.x1 - block.x0, block.y1 - block.y0, settings.slab_thickness, self.local_to_world(shape, root, cx, cy, z0 + h + settings.slab_thickness * 0.5))
+
+    def _build_auxiliary_volumes(self, settings, shape, style, root):
+        for block in getattr(shape, "volume_blocks", ()):
+            if block.role == "main":
+                continue
+            self._add_volume_shell(shape, root, block, block.floor_start * settings.floor_height, block.floor_count, settings)
+            if block.role == "upper":
+                self._build_terrace_guard(shape, root, block, settings)
+
+    def _build_terrace_guard(self, shape, root, upper_block, settings):
+        rail_h = max(0.28, settings.parapet_height * 0.9)
+        z = settings.floor_height + settings.slab_thickness + rail_h * 0.5
+        t = max(0.05, settings.parapet_thickness * 0.7)
+        if upper_block.x0 > shape.tile_size:
+            self.add_box("trim", upper_block.x0, t, rail_h, self.local_to_world(shape, root, upper_block.x0 * 0.5, t * 0.5, z))
+        if upper_block.x1 < shape.width_m - shape.tile_size:
+            span = shape.width_m - upper_block.x1
+            self.add_box("trim", span, t, rail_h, self.local_to_world(shape, root, upper_block.x1 + span * 0.5, t * 0.5, z))
+
     @staticmethod
     def _rects_overlap(a, b):
         return not (a[2] <= b[0] or a[0] >= b[2] or a[3] <= b[1] or a[1] >= b[3])
@@ -486,10 +513,12 @@ class BuildingAssembler:
     def _build_entrance_module(self, settings, style, root, z_floor, face, wx, wy, tile):
         dw = settings.door_width
         dh = settings.door_height
-        entry_style = getattr(style, "entrance_preference", getattr(settings, "entrance_style", "RECESSED"))
-        recess_depth = settings.wall_thickness * (1.4 if entry_style in {"RECESSED", "BOLD"} else 0.55)
-        canopy_factor = 0.25 if entry_style == "FLAT" else (0.65 if entry_style == "RECESSED" else 0.9)
-        frame_factor = 0.2 if entry_style == "FLAT" else (0.6 if entry_style == "RECESSED" else 0.85)
+        entry_style = getattr(style, "entrance_preference", getattr(settings, "entrance_style", "RECESSED_ENTRY"))
+        legacy_map = {"RECESSED": "RECESSED_ENTRY", "FLAT": "FRAMED_PORTAL", "BOLD": "CANOPY_COLUMNS"}
+        entry_style = legacy_map.get(entry_style, entry_style)
+        recess_depth = settings.wall_thickness * (1.55 if entry_style in {"RECESSED_ENTRY", "STAIR_REVEAL"} else 0.65)
+        canopy_factor = 0.25 if entry_style == "FRAMED_PORTAL" else (0.9 if entry_style in {"CANOPY_COLUMNS", "STAIR_REVEAL"} else 0.65)
+        frame_factor = 0.5 if entry_style == "RECESSED_ENTRY" else (0.75 if entry_style == "FRAMED_PORTAL" else 0.9)
         depth_sign = -1.0 if face == "front" else 1.0
         door_plane_y = wy + depth_sign * min(settings.wall_thickness * 0.25, recess_depth * 0.4)
 
@@ -522,6 +551,16 @@ class BuildingAssembler:
                 0.08,
                 (wx, wy + depth_sign * depth * 0.5, root.location.z + z_floor + min(settings.floor_height - 0.1, settings.canopy_height)),
             )
+        if entry_style in {"CANOPY_COLUMNS", "STAIR_REVEAL"}:
+            col_w = max(0.08, settings.wall_thickness * 0.42)
+            col_h = min(settings.floor_height - 0.05, dh + 0.45)
+            ycol = wy + depth_sign * max(0.2, settings.canopy_depth * 0.35)
+            self.add_box("trim", col_w, col_w, col_h, (wx - dw * 0.65, ycol, root.location.z + z_floor + col_h * 0.5))
+            self.add_box("trim", col_w, col_w, col_h, (wx + dw * 0.65, ycol, root.location.z + z_floor + col_h * 0.5))
+        if entry_style == "STAIR_REVEAL":
+            step_h = 0.09
+            for i in range(3):
+                self.add_box("floor", dw + 1.0 + i * 0.26, 0.32, step_h, (wx, wy + depth_sign * (0.62 + i * 0.28), root.location.z + z_floor + step_h * (i + 0.5)))
 
     def _build_balcony_variant(self, settings, style, root, z_floor, face, wx, wy, tile):
         style_seed = int(settings.seed) * 237 + int(round((wx + wy + z_floor) * 10.0))
@@ -793,3 +832,4 @@ class BuildingAssembler:
         self._build_roof_silhouette(settings, shape, style, root, roof_z, blocked_rects, rng)
         self._build_rooftop_equipment(settings, shape, style, root, roof_z, blocked_rects, rng)
         self._build_top_floor_accents(settings, shape, style, root, roof_z, blocked_rects, rng)
+        self._build_auxiliary_volumes(settings, shape, style, root)

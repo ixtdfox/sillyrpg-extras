@@ -16,6 +16,25 @@ class RectCell:
 
 
 @dataclass(frozen=True)
+class VolumeBlock:
+    role: str
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+    floor_start: int
+    floor_count: int
+
+    @property
+    def width(self) -> float:
+        return self.x1 - self.x0
+
+    @property
+    def depth(self) -> float:
+        return self.y1 - self.y0
+
+
+@dataclass(frozen=True)
 class BuildingShape:
     width_m: float
     depth_m: float
@@ -29,6 +48,7 @@ class BuildingShape:
     rooms: list[RectCell]
     doors: list[tuple[str, float, float]]
     floor_profiles: list[FloorLevel]
+    volume_blocks: tuple[VolumeBlock, ...]
 
     @classmethod
     def from_settings(cls, settings, fast_mode: bool) -> "BuildingShape":
@@ -62,6 +82,8 @@ class BuildingShape:
             for i in range(floors)
         ]
 
+        volume_blocks = build_volume_blocks(width, depth, floors, tile, int(settings.seed), str(getattr(settings, "style_preset", "MINIMAL_MODERN_VILLA")))
+
         return cls(
             width_m=width,
             depth_m=depth,
@@ -75,7 +97,78 @@ class BuildingShape:
             rooms=rooms,
             doors=doors,
             floor_profiles=floor_profiles,
+            volume_blocks=volume_blocks,
         )
+
+
+def _snap_tile(value: float, tile: float) -> float:
+    return round(value / tile) * tile
+
+
+def _clamp_rect(rect: tuple[float, float, float, float], width: float, depth: float, tile: float) -> tuple[float, float, float, float]:
+    x0, y0, x1, y1 = rect
+    x0 = max(0.0, min(width - tile * 2, _snap_tile(x0, tile)))
+    y0 = max(0.0, min(depth - tile * 2, _snap_tile(y0, tile)))
+    x1 = max(x0 + tile * 2, min(width, _snap_tile(x1, tile)))
+    y1 = max(y0 + tile * 2, min(depth, _snap_tile(y1, tile)))
+    return (x0, y0, x1, y1)
+
+
+def build_volume_blocks(width: float, depth: float, floors: int, tile: float, seed: int, preset: str) -> tuple[VolumeBlock, ...]:
+    rng = random.Random(seed * 103 + 17)
+    main = VolumeBlock("main", 0.0, 0.0, width, depth, 0, floors)
+    blocks = [main]
+
+    entrance_w = _snap_tile(max(tile * 2, width * (0.18 + rng.random() * 0.1)), tile)
+    entrance_d = _snap_tile(max(tile * 1.5, depth * (0.18 + rng.random() * 0.08)), tile)
+    cx = width * (0.35 + rng.random() * 0.3)
+    entry_rect = (
+        cx - entrance_w * 0.5,
+        -entrance_d,
+        cx + entrance_w * 0.5,
+        0.0,
+    )
+    ex0, ey0, ex1, ey1 = _clamp_rect((entry_rect[0], 0.0, entry_rect[2], entrance_d), width, depth, tile)
+    ey0 = 0.0
+    blocks.append(VolumeBlock("entrance", ex0, ey0, ex1, min(depth, ey1), 0, 1))
+
+    if width >= tile * 5 and depth >= tile * 4:
+        side_w = _snap_tile(max(tile * 2, width * (0.24 + rng.random() * 0.12)), tile)
+        side_d = _snap_tile(max(tile * 2, depth * (0.45 + rng.random() * 0.25)), tile)
+        side_on_left = rng.random() < 0.5
+        if side_on_left:
+            side_rect = (0.0, depth - side_d, side_w, depth)
+        else:
+            side_rect = (width - side_w, depth - side_d, width, depth)
+        sx0, sy0, sx1, sy1 = _clamp_rect(side_rect, width, depth, tile)
+        blocks.append(VolumeBlock("utility", sx0, sy0, sx1, sy1, 0, 1))
+
+    if floors >= 2:
+        upper_w = _snap_tile(max(tile * 2, width * (0.48 + rng.random() * 0.28)), tile)
+        upper_d = _snap_tile(max(tile * 2, depth * (0.42 + rng.random() * 0.26)), tile)
+        max_shift_x = max(0.0, width - upper_w)
+        max_shift_y = max(0.0, depth - upper_d)
+
+        if preset in {"TERRACE_HOUSE", "COMPACT_URBAN_HOUSE"}:
+            shift_x = max_shift_x * (0.05 + rng.random() * 0.35)
+            shift_y = max_shift_y * (0.15 + rng.random() * 0.45)
+        elif preset == "MINIMAL_MODERN_VILLA":
+            shift_x = max_shift_x * (0.2 + rng.random() * 0.55)
+            shift_y = max_shift_y * (0.05 + rng.random() * 0.3)
+        else:
+            shift_x = max_shift_x * (0.12 + rng.random() * 0.45)
+            shift_y = max_shift_y * (0.1 + rng.random() * 0.4)
+
+        ux0, uy0, ux1, uy1 = _clamp_rect((shift_x, shift_y, shift_x + upper_w, shift_y + upper_d), width, depth, tile)
+        blocks.append(VolumeBlock("upper", ux0, uy0, ux1, uy1, 1, min(2, floors - 1)))
+
+    # safety: keep 2-4 blocks and deterministic order
+    dedup = {}
+    for block in blocks:
+        key = (block.role, block.floor_start, block.floor_count, round(block.x0, 3), round(block.y0, 3), round(block.x1, 3), round(block.y1, 3))
+        dedup[key] = block
+    resolved = list(dedup.values())[:4]
+    return tuple(resolved)
 
 
 def split_rectangles(width, depth, target_rooms, tile, seed):
