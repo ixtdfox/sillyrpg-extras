@@ -51,6 +51,57 @@ class BuildingAssembler:
         x0, y0, _, _ = rect
         return self.local_to_world(shape, root, x0 + x, y0 + y, z)
 
+    def _rectangles_from_cells(self, cells, tile):
+        remaining = set(cells)
+        rects = []
+        while remaining:
+            sx, sy = min(remaining)
+            ex = sx + 1
+            while (ex, sy) in remaining:
+                ex += 1
+            ey = sy + 1
+            growing = True
+            while growing:
+                for ix in range(sx, ex):
+                    if (ix, ey) not in remaining:
+                        growing = False
+                        break
+                if growing:
+                    ey += 1
+            for ix in range(sx, ex):
+                for iy in range(sy, ey):
+                    remaining.discard((ix, iy))
+            rects.append((sx * tile, sy * tile, ex * tile, ey * tile))
+        return rects
+
+    def _boundary_runs(self, cells, tile):
+        cells = set(cells)
+        by_face = {"front": {}, "back": {}, "left": {}, "right": {}}
+        for ix, iy in cells:
+            if (ix, iy - 1) not in cells:
+                by_face["front"].setdefault(iy * tile, []).append(ix)
+            if (ix, iy + 1) not in cells:
+                by_face["back"].setdefault((iy + 1) * tile, []).append(ix)
+            if (ix - 1, iy) not in cells:
+                by_face["left"].setdefault(ix * tile, []).append(iy)
+            if (ix + 1, iy) not in cells:
+                by_face["right"].setdefault((ix + 1) * tile, []).append(iy)
+
+        runs = {"front": [], "back": [], "left": [], "right": []}
+        for face, lines in by_face.items():
+            for fixed, vals in lines.items():
+                vals = sorted(set(vals))
+                start = vals[0]
+                prev = vals[0]
+                for v in vals[1:]:
+                    if v == prev + 1:
+                        prev = v
+                        continue
+                    runs[face].append((fixed, start * tile, (prev + 1) * tile))
+                    start = prev = v
+                runs[face].append((fixed, start * tile, (prev + 1) * tile))
+        return runs
+
     def add_ring_parts(self, shape, root, z_center, thickness, x0, y0, x1, y1, group):
         if y0 > 0:
             self.add_box(group, shape.width_m, y0, thickness, self.local_to_world(shape, root, shape.width_m * 0.5, y0 * 0.5, z_center))
@@ -416,6 +467,38 @@ class BuildingAssembler:
 
         self._build_horizontal_accents(settings, shape, style, floor_profile, root, footprint_rect=(fx0, fy0, fx1, fy1))
         self._build_vertical_accents(settings, shape, style, floor_profile, root, front_slots, back_slots, left_slots, right_slots, footprint_rect=(fx0, fy0, fx1, fy1))
+
+    def build_outer_walls_cells(self, settings, shape, style, root, floor_profile, cells):
+        tile = shape.tile_size
+        z_floor = floor_profile.z_floor
+        runs = self._boundary_runs(cells, tile)
+
+        for face in ("front", "back", "left", "right"):
+            for fixed, a0, a1 in runs[face]:
+                side_w = max(tile, a1 - a0)
+                stack = style.facade_stack_for_side(
+                    floor_profile,
+                    face,
+                    side_w,
+                    tile,
+                    require_center_entrance=floor_profile.is_ground and face == "front",
+                )
+                slots = stack.slot_modules(tile)
+                for idx, module in enumerate(slots):
+                    c = a0 + idx * tile + tile * 0.5
+                    if face == "front":
+                        p = self.local_to_world(shape, root, c, fixed, z_floor)
+                        wx, wy = p.x, p.y - settings.wall_thickness * 0.5
+                    elif face == "back":
+                        p = self.local_to_world(shape, root, c, fixed, z_floor)
+                        wx, wy = p.x, p.y + settings.wall_thickness * 0.5
+                    elif face == "left":
+                        p = self.local_to_world(shape, root, fixed, c, z_floor)
+                        wx, wy = p.x - settings.wall_thickness * 0.5, p.y
+                    else:
+                        p = self.local_to_world(shape, root, fixed, c, z_floor)
+                        wx, wy = p.x + settings.wall_thickness * 0.5, p.y
+                    self._build_facade_module(settings, shape, style, root, z_floor, face, wx, wy, module)
 
     def _build_facade_module(self, settings, shape, style, root, z_floor, face, wx, wy, module):
         module_id = module.id
@@ -806,37 +889,45 @@ class BuildingAssembler:
             fx0, fy0, fx1, fy1 = shape.floor_footprints[floor_profile.floor_index] if getattr(shape, "floor_footprints", None) else (0.0, 0.0, shape.width_m, shape.depth_m)
             fw = max(shape.tile_size * 2, fx1 - fx0)
             fd = max(shape.tile_size * 2, fy1 - fy0)
+            floor_cells = set(shape.floor_cells[floor_profile.floor_index]) if getattr(shape, "floor_cells", None) else set()
             stair_inside = fx0 <= x0 and fy0 <= y0 and fx1 >= x1 and fy1 >= y1
 
             if floor_profile.is_ground:
-                self.add_box(
-                    "floor",
-                    fw,
-                    fd,
-                    settings.slab_thickness,
-                    self.local_to_world(shape, root, fx0 + fw * 0.5, fy0 + fd * 0.5, z_floor - settings.slab_thickness * 0.5),
-                )
+                if floor_cells:
+                    for rx0, ry0, rx1, ry1 in self._rectangles_from_cells(floor_cells, shape.tile_size):
+                        self.add_box("floor", rx1 - rx0, ry1 - ry0, settings.slab_thickness, self.local_to_world(shape, root, (rx0 + rx1) * 0.5, (ry0 + ry1) * 0.5, z_floor - settings.slab_thickness * 0.5))
+                else:
+                    self.add_box("floor", fw, fd, settings.slab_thickness, self.local_to_world(shape, root, fx0 + fw * 0.5, fy0 + fd * 0.5, z_floor - settings.slab_thickness * 0.5))
             else:
                 if stair_inside:
                     self.add_ring_parts(shape, root, z_floor - settings.slab_thickness * 0.5, settings.slab_thickness, x0, y0, x1, y1, "floor")
                 else:
-                    self.add_box("floor", fw, fd, settings.slab_thickness, self.local_to_world(shape, root, fx0 + fw * 0.5, fy0 + fd * 0.5, z_floor - settings.slab_thickness * 0.5))
+                    if floor_cells:
+                        for rx0, ry0, rx1, ry1 in self._rectangles_from_cells(floor_cells, shape.tile_size):
+                            self.add_box("floor", rx1 - rx0, ry1 - ry0, settings.slab_thickness, self.local_to_world(shape, root, (rx0 + rx1) * 0.5, (ry0 + ry1) * 0.5, z_floor - settings.slab_thickness * 0.5))
+                    else:
+                        self.add_box("floor", fw, fd, settings.slab_thickness, self.local_to_world(shape, root, fx0 + fw * 0.5, fy0 + fd * 0.5, z_floor - settings.slab_thickness * 0.5))
 
             if not floor_profile.is_top:
                 if stair_inside:
                     self.add_ring_parts(shape, root, z_floor + settings.floor_height + settings.slab_thickness * 0.5, settings.slab_thickness, x0, y0, x1, y1, "trim")
                 else:
-                    self.add_box("trim", fw, fd, settings.slab_thickness, self.local_to_world(shape, root, fx0 + fw * 0.5, fy0 + fd * 0.5, z_floor + settings.floor_height + settings.slab_thickness * 0.5))
+                    if floor_cells:
+                        for rx0, ry0, rx1, ry1 in self._rectangles_from_cells(floor_cells, shape.tile_size):
+                            self.add_box("trim", rx1 - rx0, ry1 - ry0, settings.slab_thickness, self.local_to_world(shape, root, (rx0 + rx1) * 0.5, (ry0 + ry1) * 0.5, z_floor + settings.floor_height + settings.slab_thickness * 0.5))
+                    else:
+                        self.add_box("trim", fw, fd, settings.slab_thickness, self.local_to_world(shape, root, fx0 + fw * 0.5, fy0 + fd * 0.5, z_floor + settings.floor_height + settings.slab_thickness * 0.5))
             else:
-                self.add_box(
-                    "roof",
-                    fw,
-                    fd,
-                    settings.slab_thickness,
-                    self.local_to_world(shape, root, fx0 + fw * 0.5, fy0 + fd * 0.5, z_floor + settings.floor_height + settings.slab_thickness * 0.5),
-                )
+                if floor_cells:
+                    for rx0, ry0, rx1, ry1 in self._rectangles_from_cells(floor_cells, shape.tile_size):
+                        self.add_box("roof", rx1 - rx0, ry1 - ry0, settings.slab_thickness, self.local_to_world(shape, root, (rx0 + rx1) * 0.5, (ry0 + ry1) * 0.5, z_floor + settings.floor_height + settings.slab_thickness * 0.5))
+                else:
+                    self.add_box("roof", fw, fd, settings.slab_thickness, self.local_to_world(shape, root, fx0 + fw * 0.5, fy0 + fd * 0.5, z_floor + settings.floor_height + settings.slab_thickness * 0.5))
 
-            self.build_outer_walls(settings, shape, style, root, floor_profile, footprint_rect=(fx0, fy0, fx1, fy1))
+            if floor_cells:
+                self.build_outer_walls_cells(settings, shape, style, root, floor_profile, floor_cells)
+            else:
+                self.build_outer_walls(settings, shape, style, root, floor_profile, footprint_rect=(fx0, fy0, fx1, fy1))
             if stair_inside:
                 self.build_inner_walls(settings, shape, root, floor_profile)
 

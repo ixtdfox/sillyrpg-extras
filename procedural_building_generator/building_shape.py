@@ -50,6 +50,7 @@ class BuildingShape:
     floor_profiles: list[FloorLevel]
     volume_blocks: tuple[VolumeBlock, ...]
     floor_footprints: tuple[tuple[float, float, float, float], ...]
+    floor_cells: tuple[tuple[tuple[int, int], ...], ...]
 
     @classmethod
     def from_settings(cls, settings, fast_mode: bool) -> "BuildingShape":
@@ -85,6 +86,7 @@ class BuildingShape:
 
         volume_blocks = build_volume_blocks(width, depth, floors, tile, int(settings.seed), str(getattr(settings, "style_preset", "MINIMAL_MODERN_VILLA")))
         floor_footprints = tuple(build_floor_footprints(width, depth, floors, volume_blocks))
+        floor_cells = tuple(build_floor_cells(width, depth, tile, floors, volume_blocks))
 
         return cls(
             width_m=width,
@@ -101,6 +103,7 @@ class BuildingShape:
             floor_profiles=floor_profiles,
             volume_blocks=volume_blocks,
             floor_footprints=floor_footprints,
+            floor_cells=floor_cells,
         )
 
 
@@ -190,6 +193,25 @@ def build_floor_footprints(width: float, depth: float, floors: int, blocks: tupl
         y1 = max(b.y1 for b in active)
         result.append((x0, y0, x1, y1))
     return result
+
+
+def build_floor_cells(width: float, depth: float, tile: float, floors: int, blocks: tuple[VolumeBlock, ...]) -> list[tuple[tuple[int, int], ...]]:
+    nx = max(1, int(round(width / tile)))
+    ny = max(1, int(round(depth / tile)))
+    out: list[tuple[tuple[int, int], ...]] = []
+    for floor_idx in range(floors):
+        cells: set[tuple[int, int]] = set()
+        active = [b for b in blocks if b.floor_start <= floor_idx < (b.floor_start + b.floor_count)]
+        for block in active:
+            ix0 = max(0, int(math.floor(block.x0 / tile + 1e-6)))
+            iy0 = max(0, int(math.floor(block.y0 / tile + 1e-6)))
+            ix1 = min(nx, int(math.ceil(block.x1 / tile - 1e-6)))
+            iy1 = min(ny, int(math.ceil(block.y1 / tile - 1e-6)))
+            for ix in range(ix0, ix1):
+                for iy in range(iy0, iy1):
+                    cells.add((ix, iy))
+        out.append(tuple(sorted(cells)))
+    return out
 
 
 def split_rectangles(width, depth, target_rooms, tile, seed):
