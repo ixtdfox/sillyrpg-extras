@@ -77,6 +77,11 @@ class BuildingGenerator:
         self.clear()
 
         shape = self.resolve_shape(safe_settings, rebuild_shape)
+        print(
+            f"composition tier: {getattr(shape, 'composition_tier', 'A')}, "
+            f"stair placement: {getattr(shape, 'stair_status', 'unknown')}, "
+            f"fallback: {getattr(shape, 'fallback_reason', 'none')}"
+        )
         style = BuildingStyle.from_settings(safe_settings, self.fast_mode)
         apply_style_material_tuning(self.mats, style)
         assembler = BuildingAssembler(self.batch, self.col, self.asset_helper_col, self.asset_instance_col)
