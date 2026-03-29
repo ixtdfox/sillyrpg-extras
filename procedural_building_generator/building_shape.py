@@ -156,6 +156,20 @@ def _blocks_attach(a: VolumeBlock, b: VolumeBlock, tile: float) -> bool:
     return (touch_x and y_overlap >= tile * 0.5) or (touch_y and x_overlap >= tile * 0.5)
 
 
+def _attachment_strength(a: VolumeBlock, b: VolumeBlock) -> float:
+    x_overlap = _overlap_1d(a.x0, a.x1, b.x0, b.x1)
+    y_overlap = _overlap_1d(a.y0, a.y1, b.y0, b.y1)
+    if x_overlap > 0.0 and y_overlap > 0.0:
+        return x_overlap * y_overlap
+    touch_x = abs(a.x1 - b.x0) <= 1e-6 or abs(b.x1 - a.x0) <= 1e-6
+    touch_y = abs(a.y1 - b.y0) <= 1e-6 or abs(b.y1 - a.y0) <= 1e-6
+    if touch_x:
+        return y_overlap
+    if touch_y:
+        return x_overlap
+    return 0.0
+
+
 def _validate_blocks(width: float, depth: float, floors: int, tile: float, blocks: tuple[VolumeBlock, ...]) -> tuple[bool, str]:
     main = next((b for b in blocks if b.role == "main"), None)
     if main is None:
@@ -165,6 +179,13 @@ def _validate_blocks(width: float, depth: float, floors: int, tile: float, block
     for b in blocks:
         if b.width < tile * 2 or b.depth < tile * 2:
             return False, f"{b.role} block too thin"
+        if b.role in {"entrance", "utility"}:
+            min_area = tile * tile * (4 if b.role == "entrance" else 6)
+            if b.width * b.depth < min_area:
+                return False, f"{b.role} block too small"
+            aspect = max(b.width, b.depth) / max(tile * 0.25, min(b.width, b.depth))
+            if aspect > (4.0 if b.role == "entrance" else 3.0):
+                return False, f"{b.role} block too strip-like"
         if b.x0 < -1e-6 or b.y0 < -1e-6 or b.x1 > width + 1e-6 or b.y1 > depth + 1e-6:
             return False, f"{b.role} block out of bounds"
         if b.floor_count <= 0:
@@ -173,6 +194,11 @@ def _validate_blocks(width: float, depth: float, floors: int, tile: float, block
             return False, f"{b.role} floor span invalid"
         if b.role != "main" and not _blocks_attach(main, b, tile):
             return False, f"detached {b.role} block"
+        if b.role in {"entrance", "utility"}:
+            strength = _attachment_strength(main, b)
+            min_strength = tile * tile * (1.6 if b.role == "entrance" else 2.0)
+            if strength < min_strength:
+                return False, f"weak {b.role} attachment"
 
     floor_cells = build_floor_cells(width, depth, tile, floors, blocks)
     for floor_idx, cells in enumerate(floor_cells):
@@ -219,11 +245,12 @@ def _build_tier_a(width: float, depth: float, floors: int, tile: float, seed: in
         side_w = _snap_tile(max(tile * 2, width * (0.24 + rng.random() * 0.12)), tile)
         side_d = _snap_tile(max(tile * 2, depth * (0.45 + rng.random() * 0.25)), tile)
         side_on_left = rng.random() < 0.5
+        overlap = min(tile * 2, max(tile, side_w * 0.45))
         side_y0 = max(0.0, min(depth - side_d, main.y0 + (main.depth - side_d) * (0.2 + rng.random() * 0.5)))
         if side_on_left:
-            side_rect = (max(0.0, main.x0 - side_w + tile), side_y0, max(tile * 2, main.x0 + tile), side_y0 + side_d)
+            side_rect = (max(0.0, main.x0 - side_w + overlap), side_y0, max(tile * 2, main.x0 + overlap), side_y0 + side_d)
         else:
-            side_rect = (min(width - tile * 2, main.x1 - tile), side_y0, min(width, main.x1 + side_w - tile), side_y0 + side_d)
+            side_rect = (min(width - tile * 2, main.x1 - overlap), side_y0, min(width, main.x1 + side_w - overlap), side_y0 + side_d)
         sx0, sy0, sx1, sy1 = _clamp_rect(side_rect, width, depth, tile)
         blocks.append(VolumeBlock("utility", sx0, sy0, sx1, sy1, 0, 1))
 
