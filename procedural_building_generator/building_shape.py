@@ -181,30 +181,10 @@ def build_volume_blocks(width: float, depth: float, floors: int, tile: float, se
         blocks.append(VolumeBlock("utility", sx0, sy0, sx1, sy1, 0, 1))
 
     if floors >= 2:
-        if floors >= 3:
-            blocks.append(VolumeBlock("upper", main.x0, main.y0, main.x1, main.y1, 1, floors - 1))
-            dedup = {}
-            for block in blocks:
-                key = (block.role, block.floor_start, block.floor_count, round(block.x0, 3), round(block.y0, 3), round(block.x1, 3), round(block.y1, 3))
-                dedup[key] = block
-            return tuple(list(dedup.values())[:4])
-        upper_w = _snap_tile(max(tile * 2, main.width * (0.62 + rng.random() * 0.28)), tile)
-        upper_d = _snap_tile(max(tile * 2, main.depth * (0.58 + rng.random() * 0.26)), tile)
-        max_shift_x = max(0.0, main.width - upper_w)
-        max_shift_y = max(0.0, main.depth - upper_d)
-
-        if preset in {"TERRACE_HOUSE", "COMPACT_URBAN_HOUSE"}:
-            shift_x = main.x0 + max_shift_x * (0.05 + rng.random() * 0.35)
-            shift_y = main.y0 + max_shift_y * (0.18 + rng.random() * 0.45)
-        elif preset == "MINIMAL_MODERN_VILLA":
-            shift_x = main.x0 + max_shift_x * (0.2 + rng.random() * 0.55)
-            shift_y = main.y0 + max_shift_y * (0.05 + rng.random() * 0.3)
-        else:
-            shift_x = main.x0 + max_shift_x * (0.12 + rng.random() * 0.45)
-            shift_y = main.y0 + max_shift_y * (0.1 + rng.random() * 0.4)
-
-        ux0, uy0, ux1, uy1 = _clamp_rect((shift_x, shift_y, shift_x + upper_w, shift_y + upper_d), width, depth, tile)
-        blocks.append(VolumeBlock("upper", ux0, uy0, ux1, uy1, 1, min(2, floors - 1)))
+        # Robustness-first rule:
+        # keep upper floors aligned with main mass so external walls are always present
+        # and stair-to-floor continuity stays predictable.
+        blocks.append(VolumeBlock("upper", main.x0, main.y0, main.x1, main.y1, 1, floors - 1))
 
     # safety: keep 2-4 blocks and deterministic order
     dedup = {}

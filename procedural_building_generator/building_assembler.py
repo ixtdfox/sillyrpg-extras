@@ -884,31 +884,20 @@ class BuildingAssembler:
         zone = shape.stair_zone
         clear_h = settings.floor_height
         rise = max(0.05, settings.stairs_rise_step)
-        run_pref = max(0.12, settings.stairs_run_step)
         stair_w = min(settings.stairs_width, (zone.x1 - zone.x0) - 0.2)
         n_steps = max(1, math.ceil(clear_h / rise))
         exact_rise = clear_h / n_steps
-        available_depth = max(1.4, (zone.y1 - zone.y0) - 0.7)
-        run = max(0.12, min(run_pref, available_depth / max(1, n_steps)))
-        first = max(1, n_steps // 2)
-        second = max(0, n_steps - first)
-        landing_depth = max(0.45, available_depth - run * n_steps)
+        y_start = zone.y0 + 0.25
+        y_end = zone.y1 - 0.2
+        available_depth = max(0.8, y_end - y_start)
+        run = max(0.12, available_depth / n_steps)
         x_mid = (zone.x0 + zone.x1) * 0.5
-        y_start = zone.y0 + 0.35
-        for i in range(first):
+        for i in range(n_steps):
             z = z_floor + exact_rise * (i + 0.5)
             y = y_start + run * i
             self.add_box("floor", stair_w, run, exact_rise, self.local_to_world(shape, root, x_mid, y, z))
-        landing_y = y_start + run * first + landing_depth * 0.5
-        landing_z = z_floor + exact_rise * first + 0.05
-        self.add_box("floor", stair_w, landing_depth, 0.10, self.local_to_world(shape, root, x_mid, landing_y, landing_z))
-        y2 = y_start + run * first + landing_depth
-        for i in range(second):
-            z = z_floor + exact_rise * (first + i + 0.5)
-            y = y2 + run * i
-            self.add_box("floor", stair_w, run, exact_rise, self.local_to_world(shape, root, x_mid, y, z))
-        top_cap_y = min(zone.y1 - run * 0.5, y2 + run * max(0, second - 1) + run)
-        self.add_box("floor", stair_w, max(0.18, run), 0.08, self.local_to_world(shape, root, x_mid, top_cap_y, z_floor + clear_h - 0.04))
+        top_cap_y = min(y_end - run * 0.25, y_start + run * (n_steps - 0.25))
+        self.add_box("floor", stair_w, max(0.2, run * 1.1), 0.08, self.local_to_world(shape, root, x_mid, top_cap_y, z_floor + clear_h - 0.04))
 
     def assemble(self, settings, shape, style, root):
         pad = settings.lot_padding
