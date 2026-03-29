@@ -923,6 +923,23 @@ class BuildingAssembler:
                         self.add_box("trim", shape.tile_size, settings.wall_thickness, settings.floor_height, (wx, wy, root.location.z + z_floor + settings.floor_height * 0.5))
                 p += shape.tile_size
 
+    def _stair_ceiling_opening(self, settings, shape):
+        x0, y0, x1, y1 = shape.stair_opening
+        zone = shape.stair_zone
+        clear_h = settings.floor_height
+        rise = max(0.05, settings.stairs_rise_step)
+        n_steps = max(1, math.ceil(clear_h / rise))
+        y_start = zone.y0 + 0.25
+        y_end = zone.y1 - 0.2
+        available_depth = max(0.8, y_end - y_start)
+        run = max(0.12, available_depth / n_steps)
+        top_cap_d = max(0.28, run * 1.25)
+        top_cap_y = min(zone.y1 - top_cap_d * 0.5 - 0.02, y_start + run * n_steps)
+        cap_front_y = top_cap_y + top_cap_d * 0.5
+        margin = max(0.02, float(getattr(settings, "stair_opening_margin", 0.0)))
+        y1 = min(shape.depth_m, max(y1, cap_front_y + margin + 0.05))
+        return (x0, y0, x1, y1)
+
     def build_stairs(self, settings, shape, root, floor_profile):
         z_floor = floor_profile.z_floor
         zone = shape.stair_zone
@@ -971,7 +988,7 @@ class BuildingAssembler:
                 is_ground=(floor_index == 0),
                 is_top=(floor_index == shape.floors - 1),
             )
-            x0, y0, x1, y1 = shape.stair_opening
+            x0, y0, x1, y1 = self._stair_ceiling_opening(settings, shape)
             volume_rects = self._connected_rects_or_fallback(self._active_volume_rects(shape, floor_index))
             if len(volume_rects) == 1 and len(self._active_volume_rects(shape, floor_index)) > 1:
                 print(f"[PBG] floor {floor_index}: disconnected volumes detected, fallback to simplified footprint")
