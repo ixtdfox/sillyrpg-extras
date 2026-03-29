@@ -51,6 +51,9 @@ class BuildingShape:
     volume_blocks: tuple[VolumeBlock, ...]
     floor_footprints: tuple[tuple[float, float, float, float], ...]
     floor_cells: tuple[tuple[tuple[int, int], ...], ...]
+    composition_tier: str
+    fallback_reason: str
+    stair_status: str
 
     @classmethod
     def from_settings(cls, settings, fast_mode: bool) -> "BuildingShape":
@@ -62,15 +65,6 @@ class BuildingShape:
 
         stair_w = max(tile * 2, math.ceil(settings.stairs_width / tile) * tile)
         stair_d = tile * 4
-        zone = RectCell(tile, tile, tile + stair_w, tile + stair_d)
-
-        margin = settings.stair_opening_margin
-        opening = (
-            max(0.0, zone.x0 - margin),
-            max(0.0, zone.y0 - margin),
-            min(width, zone.x1 + margin),
-            min(depth, zone.y1 + margin),
-        )
 
         rooms = split_rectangles(width, depth, room_count, tile, settings.seed)
         doors = choose_connected_doors(rooms, settings.seed)
@@ -84,9 +78,32 @@ class BuildingShape:
             for i in range(floors)
         ]
 
-        volume_blocks = build_volume_blocks(width, depth, floors, tile, int(settings.seed), str(getattr(settings, "style_preset", "MINIMAL_MODERN_VILLA")))
+        volume_blocks, composition_tier, fallback_reason = build_volume_blocks(width, depth, floors, tile, int(settings.seed), str(getattr(settings, "style_preset", "MINIMAL_MODERN_VILLA")))
         floor_footprints = tuple(build_floor_footprints(width, depth, floors, volume_blocks))
         floor_cells = tuple(build_floor_cells(width, depth, tile, floors, volume_blocks))
+        zone = _resolve_stair_zone(width, depth, tile, floors, stair_w, stair_d, floor_cells)
+        if zone is None:
+            single_main = (VolumeBlock("main", 0.0, 0.0, width, depth, 0, floors),)
+            volume_blocks = single_main
+            floor_footprints = tuple(build_floor_footprints(width, depth, floors, volume_blocks))
+            floor_cells = tuple(build_floor_cells(width, depth, tile, floors, volume_blocks))
+            zone = _resolve_stair_zone(width, depth, tile, floors, stair_w, stair_d, floor_cells)
+            composition_tier = "C"
+            base_reason = fallback_reason if fallback_reason != "none" else "stair placement failed"
+            fallback_reason = f"{base_reason} -> fallback to coherent single block"
+        if zone is None:
+            zone = RectCell(tile, tile, min(width, tile + stair_w), min(depth, tile + stair_d))
+            stair_status = "forced-default-zone"
+        else:
+            stair_status = "placed"
+
+        margin = settings.stair_opening_margin
+        opening = (
+            max(0.0, zone.x0 - margin),
+            max(0.0, zone.y0 - margin),
+            min(width, zone.x1 + margin),
+            min(depth, zone.y1 + margin),
+        )
 
         return cls(
             width_m=width,
@@ -104,6 +121,9 @@ class BuildingShape:
             volume_blocks=volume_blocks,
             floor_footprints=floor_footprints,
             floor_cells=floor_cells,
+            composition_tier=composition_tier,
+            fallback_reason=fallback_reason,
+            stair_status=stair_status,
         )
 
 
@@ -120,7 +140,62 @@ def _clamp_rect(rect: tuple[float, float, float, float], width: float, depth: fl
     return (x0, y0, x1, y1)
 
 
-def build_volume_blocks(width: float, depth: float, floors: int, tile: float, seed: int, preset: str) -> tuple[VolumeBlock, ...]:
+def _overlap_1d(a0: float, a1: float, b0: float, b1: float) -> float:
+    return max(0.0, min(a1, b1) - max(a0, b0))
+
+
+def _blocks_attach(a: VolumeBlock, b: VolumeBlock, tile: float) -> bool:
+    x_overlap = _overlap_1d(a.x0, a.x1, b.x0, b.x1)
+    y_overlap = _overlap_1d(a.y0, a.y1, b.y0, b.y1)
+    if x_overlap >= tile * 0.5 and y_overlap > 1e-6:
+        return True
+    if y_overlap >= tile * 0.5 and x_overlap > 1e-6:
+        return True
+    touch_x = abs(a.x1 - b.x0) <= 1e-6 or abs(b.x1 - a.x0) <= 1e-6
+    touch_y = abs(a.y1 - b.y0) <= 1e-6 or abs(b.y1 - a.y0) <= 1e-6
+    return (touch_x and y_overlap >= tile * 0.5) or (touch_y and x_overlap >= tile * 0.5)
+
+
+def _validate_blocks(width: float, depth: float, floors: int, tile: float, blocks: tuple[VolumeBlock, ...]) -> tuple[bool, str]:
+    main = next((b for b in blocks if b.role == "main"), None)
+    if main is None:
+        return False, "missing main block"
+    if main.width < tile * 2 or main.depth < tile * 2:
+        return False, "main block too thin"
+    for b in blocks:
+        if b.width < tile * 2 or b.depth < tile * 2:
+            return False, f"{b.role} block too thin"
+        if b.x0 < -1e-6 or b.y0 < -1e-6 or b.x1 > width + 1e-6 or b.y1 > depth + 1e-6:
+            return False, f"{b.role} block out of bounds"
+        if b.floor_count <= 0:
+            return False, f"{b.role} has no floors"
+        if b.floor_start < 0 or (b.floor_start + b.floor_count) > floors:
+            return False, f"{b.role} floor span invalid"
+        if b.role != "main" and not _blocks_attach(main, b, tile):
+            return False, f"detached {b.role} block"
+
+    floor_cells = build_floor_cells(width, depth, tile, floors, blocks)
+    for floor_idx, cells in enumerate(floor_cells):
+        if not cells:
+            return False, f"empty floor cells on floor {floor_idx}"
+        pending = set(cells)
+        stack = [next(iter(pending))]
+        seen = set()
+        while stack:
+            c = stack.pop()
+            if c in seen:
+                continue
+            seen.add(c)
+            x, y = c
+            for n in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+                if n in pending and n not in seen:
+                    stack.append(n)
+        if len(seen) != len(pending):
+            return False, f"disconnected floor mass on floor {floor_idx}"
+    return True, "ok"
+
+
+def _build_tier_a(width: float, depth: float, floors: int, tile: float, seed: int, preset: str) -> tuple[VolumeBlock, ...]:
     rng = random.Random(seed * 103 + 17)
     main_w = _snap_tile(max(tile * 4, width * (0.62 + rng.random() * 0.2)), tile)
     main_d = _snap_tile(max(tile * 4, depth * (0.58 + rng.random() * 0.24)), tile)
@@ -178,6 +253,83 @@ def build_volume_blocks(width: float, depth: float, floors: int, tile: float, se
         dedup[key] = block
     resolved = list(dedup.values())[:4]
     return tuple(resolved)
+
+
+def _build_tier_b(width: float, depth: float, floors: int, tile: float, seed: int, preset: str) -> tuple[VolumeBlock, ...]:
+    rng = random.Random(seed * 97 + 29)
+    main_w = _snap_tile(max(tile * 5, width * (0.7 + rng.random() * 0.16)), tile)
+    main_d = _snap_tile(max(tile * 5, depth * (0.68 + rng.random() * 0.16)), tile)
+    mx0, my0, mx1, my1 = _clamp_rect((0.0, 0.0, main_w, main_d), width, depth, tile)
+    main = VolumeBlock("main", mx0, my0, mx1, my1, 0, floors)
+    entrance_w = _snap_tile(max(tile * 2, main.width * (0.3 + rng.random() * 0.12)), tile)
+    ex0 = _snap_tile(main.x0 + (main.width - entrance_w) * (0.3 + rng.random() * 0.35), tile)
+    ex1 = min(width, ex0 + entrance_w)
+    ey1 = min(depth, main.y0 + tile * 1.2)
+    ey0 = max(0.0, ey1 - tile * 2)
+    ex0, ey0, ex1, ey1 = _clamp_rect((ex0, ey0, ex1, ey1), width, depth, tile)
+    blocks = [main, VolumeBlock("entrance", ex0, ey0, ex1, ey1, 0, 1)]
+    if floors >= 2:
+        upper_inset_x = _snap_tile(tile * (1 + (seed % 2)), tile)
+        upper_inset_y = _snap_tile(tile * (1 + ((seed // 2) % 2)), tile)
+        ux0 = main.x0 + upper_inset_x
+        uy0 = main.y0 + upper_inset_y
+        ux1 = max(ux0 + tile * 2, main.x1 - upper_inset_x)
+        uy1 = max(uy0 + tile * 2, main.y1 - upper_inset_y)
+        ux0, uy0, ux1, uy1 = _clamp_rect((ux0, uy0, ux1, uy1), width, depth, tile)
+        blocks.append(VolumeBlock("upper", ux0, uy0, ux1, uy1, 1, min(2, floors - 1)))
+    return tuple(blocks)
+
+
+def _build_tier_c(width: float, depth: float, floors: int) -> tuple[VolumeBlock, ...]:
+    return (VolumeBlock("main", 0.0, 0.0, width, depth, 0, floors),)
+
+
+def build_volume_blocks(width: float, depth: float, floors: int, tile: float, seed: int, preset: str) -> tuple[tuple[VolumeBlock, ...], str, str]:
+    tiers = (
+        ("A", _build_tier_a(width, depth, floors, tile, seed, preset), "none"),
+        ("B", _build_tier_b(width, depth, floors, tile, seed, preset), "multi-volume composition invalid"),
+        ("C", _build_tier_c(width, depth, floors), "attached two-volume composition invalid"),
+    )
+    prior_reason = "none"
+    for idx, (tier, blocks, reason) in enumerate(tiers):
+        valid, detail = _validate_blocks(width, depth, floors, tile, blocks)
+        if valid:
+            if idx == 0:
+                return blocks, tier, "none"
+            return blocks, tier, f"{prior_reason}: {detail} -> fallback to tier {tier}"
+        prior_reason = reason if idx == 0 else f"{prior_reason}: {detail}"
+    return tiers[-1][1], "C", f"{prior_reason}: forcing coherent single block"
+
+
+def _resolve_stair_zone(width: float, depth: float, tile: float, floors: int, stair_w: float, stair_d: float, floor_cells: tuple[tuple[tuple[int, int], ...], ...]) -> RectCell | None:
+    if floors <= 1:
+        return RectCell(tile, tile, min(width, tile + stair_w), min(depth, tile + stair_d))
+    req_w = max(2, int(round(stair_w / tile)))
+    req_d = 4
+    common = set(floor_cells[0]) if floor_cells else set()
+    for floor_idx in range(1, min(floors, len(floor_cells))):
+        common &= set(floor_cells[floor_idx])
+    if not common:
+        return None
+    nx = max(1, int(round(width / tile)))
+    ny = max(1, int(round(depth / tile)))
+    candidates = []
+    for iy in range(0, ny - req_d + 1):
+        for ix in range(0, nx - req_w + 1):
+            ok = True
+            for tx in range(ix, ix + req_w):
+                for ty in range(iy, iy + req_d):
+                    if (tx, ty) not in common:
+                        ok = False
+                        break
+                if not ok:
+                    break
+            if ok:
+                candidates.append((ix, iy))
+    if not candidates:
+        return None
+    pick_ix, pick_iy = sorted(candidates, key=lambda v: (v[0] + v[1], v[1], v[0]))[0]
+    return RectCell(pick_ix * tile, pick_iy * tile, (pick_ix + req_w) * tile, (pick_iy + req_d) * tile)
 
 
 def build_floor_footprints(width: float, depth: float, floors: int, blocks: tuple[VolumeBlock, ...]) -> list[tuple[float, float, float, float]]:

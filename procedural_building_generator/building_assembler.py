@@ -872,6 +872,22 @@ class BuildingAssembler:
             z = z_floor + exact_rise * (first + i + 0.5)
             y = y2 + run * i
             self.add_box("floor", stair_w, run, exact_rise, self.local_to_world(shape, root, x_mid, y, z))
+        return True
+
+    @staticmethod
+    def _rect_inside_cells(rect, cells, tile):
+        if not cells:
+            return False
+        x0, y0, x1, y1 = rect
+        ix0 = int(math.floor(x0 / tile + 1e-6))
+        iy0 = int(math.floor(y0 / tile + 1e-6))
+        ix1 = int(math.ceil(x1 / tile - 1e-6))
+        iy1 = int(math.ceil(y1 / tile - 1e-6))
+        for ix in range(ix0, ix1):
+            for iy in range(iy0, iy1):
+                if (ix, iy) not in cells:
+                    return False
+        return True
 
     def assemble(self, settings, shape, style, root):
         pad = settings.lot_padding
@@ -883,6 +899,10 @@ class BuildingAssembler:
             self.local_to_world(shape, root, shape.width_m * 0.5, shape.depth_m * 0.5, -0.03),
         )
 
+        stairs_required = shape.floors > 1
+        stairs_built = False
+        stair_opening_enabled = stairs_required and getattr(shape, "stair_status", "") == "placed"
+
         for floor_profile in shape.floor_profiles:
             z_floor = floor_profile.z_floor
             x0, y0, x1, y1 = shape.stair_opening
@@ -891,6 +911,9 @@ class BuildingAssembler:
             fd = max(shape.tile_size * 2, fy1 - fy0)
             floor_cells = set(shape.floor_cells[floor_profile.floor_index]) if getattr(shape, "floor_cells", None) else set()
             stair_inside = fx0 <= x0 and fy0 <= y0 and fx1 >= x1 and fy1 >= y1
+            if floor_cells:
+                stair_inside = stair_inside and self._rect_inside_cells((x0, y0, x1, y1), floor_cells, shape.tile_size)
+            stair_ok = stair_opening_enabled and stair_inside
             use_cell_shell = bool(floor_cells)
 
             if floor_profile.is_ground:
@@ -903,7 +926,7 @@ class BuildingAssembler:
                 if use_cell_shell:
                     for rx0, ry0, rx1, ry1 in self._rectangles_from_cells(floor_cells, shape.tile_size):
                         self.add_box("floor", rx1 - rx0, ry1 - ry0, settings.slab_thickness, self.local_to_world(shape, root, (rx0 + rx1) * 0.5, (ry0 + ry1) * 0.5, z_floor - settings.slab_thickness * 0.5))
-                elif stair_inside:
+                elif stair_ok:
                     self.add_ring_parts(shape, root, z_floor - settings.slab_thickness * 0.5, settings.slab_thickness, x0, y0, x1, y1, "floor")
                 else:
                     self.add_box("floor", fw, fd, settings.slab_thickness, self.local_to_world(shape, root, fx0 + fw * 0.5, fy0 + fd * 0.5, z_floor - settings.slab_thickness * 0.5))
@@ -912,7 +935,7 @@ class BuildingAssembler:
                 if use_cell_shell:
                     for rx0, ry0, rx1, ry1 in self._rectangles_from_cells(floor_cells, shape.tile_size):
                         self.add_box("trim", rx1 - rx0, ry1 - ry0, settings.slab_thickness, self.local_to_world(shape, root, (rx0 + rx1) * 0.5, (ry0 + ry1) * 0.5, z_floor + settings.floor_height + settings.slab_thickness * 0.5))
-                elif stair_inside:
+                elif stair_ok:
                     self.add_ring_parts(shape, root, z_floor + settings.floor_height + settings.slab_thickness * 0.5, settings.slab_thickness, x0, y0, x1, y1, "trim")
                 else:
                     self.add_box("trim", fw, fd, settings.slab_thickness, self.local_to_world(shape, root, fx0 + fw * 0.5, fy0 + fd * 0.5, z_floor + settings.floor_height + settings.slab_thickness * 0.5))
@@ -927,7 +950,7 @@ class BuildingAssembler:
                 self.build_outer_walls_cells(settings, shape, style, root, floor_profile, floor_cells)
             else:
                 self.build_outer_walls(settings, shape, style, root, floor_profile, footprint_rect=(fx0, fy0, fx1, fy1))
-            if floor_profile.is_ground and stair_inside:
+            if floor_profile.is_ground and stair_ok:
                 self.build_inner_walls(settings, shape, root, floor_profile)
 
             if floor_profile.is_ground:
@@ -939,13 +962,21 @@ class BuildingAssembler:
                     self.local_to_world(shape, root, fx0 + fw * 0.5, fy0 + settings.wall_thickness + 1.2, z_floor + 0.02),
                 )
 
-            if (not use_cell_shell) and (not floor_profile.is_top) and stair_inside:
-                self.build_stairs(settings, shape, root, floor_profile)
+            if (not floor_profile.is_top) and stair_ok:
+                stairs_built = self.build_stairs(settings, shape, root, floor_profile) or stairs_built
 
         roof_z = shape.floors * settings.floor_height
         top_rect = shape.floor_footprints[-1] if getattr(shape, "floor_footprints", None) else (0.0, 0.0, shape.width_m, shape.depth_m)
-        blocked_rects = [shape.stair_opening] if (top_rect[0] <= shape.stair_opening[0] and top_rect[1] <= shape.stair_opening[1] and top_rect[2] >= shape.stair_opening[2] and top_rect[3] >= shape.stair_opening[3]) else []
+        top_stair_valid = stair_opening_enabled and (
+            top_rect[0] <= shape.stair_opening[0]
+            and top_rect[1] <= shape.stair_opening[1]
+            and top_rect[2] >= shape.stair_opening[2]
+            and top_rect[3] >= shape.stair_opening[3]
+        )
+        blocked_rects = [shape.stair_opening] if top_stair_valid else []
         rng = random.Random((int(settings.seed) * 73856093) ^ (shape.floors * 19349663) ^ int(shape.width_m * 100) ^ (int(shape.depth_m * 100) << 1))
         self._build_roof_silhouette(settings, shape, style, root, roof_z, blocked_rects, rng, roof_rect=top_rect)
         self._build_rooftop_equipment(settings, shape, style, root, roof_z, blocked_rects, rng, roof_rect=top_rect)
         self._build_top_floor_accents(settings, shape, style, root, roof_z, blocked_rects, rng, roof_rect=top_rect)
+        if stairs_required and not stairs_built:
+            print("stair placement failed in current composition -> fallback shape should have been applied")
