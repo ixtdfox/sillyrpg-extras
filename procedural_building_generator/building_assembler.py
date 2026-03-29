@@ -12,8 +12,9 @@ from .utils import GENERATOR_TAG
 
 
 class BuildingAssembler:
-    WINDOW_OVERLAP = 0.015
-    MODULE_OVERLAP = 0.01
+    WINDOW_OVERLAP = 0.0
+    MODULE_OVERLAP = 0.0
+    SURFACE_EPSILON = 0.012
     MIN_WINDOW_WIDTH = 0.8
     MIN_WINDOW_HEIGHT = 0.7
 
@@ -25,6 +26,19 @@ class BuildingAssembler:
 
     def add_box(self, group, sx, sy, sz, center):
         self.batch.add_box(group, sx, sy, sz, center)
+
+    @staticmethod
+    def _face_normal(face: str):
+        return {
+            "front": (0.0, -1.0),
+            "back": (0.0, 1.0),
+            "left": (-1.0, 0.0),
+            "right": (1.0, 0.0),
+        }[face]
+
+    def _offset_on_face(self, face: str, wx: float, wy: float, distance: float):
+        nx, ny = self._face_normal(face)
+        return wx + nx * distance, wy + ny * distance
 
     def local_to_world(self, shape, root, x, y, z):
         return Vector((
@@ -228,7 +242,7 @@ class BuildingAssembler:
         floor_h = float(settings.floor_height)
         clearance = float(getattr(settings, "minimum_window_clearance", 0.5))
         overlap = float(getattr(settings, "window_overlap", self.WINDOW_OVERLAP))
-        overlap = max(0.01, min(0.02, overlap))
+        overlap = max(0.0, min(0.002, overlap))
         max_sill = max(0.0, floor_h - 0.8)
         max_head = max(0.0, floor_h - 0.05)
         sill = max(0.0, min(max_sill, float(settings.window_sill_h) + sill_offset))
@@ -267,7 +281,7 @@ class BuildingAssembler:
             "upper_h": floor_h - head,
         }
 
-    def add_window_parts(self, settings, wx, wy, z_floor, axis, outward_sign, root, layout):
+    def add_window_parts(self, settings, wx, wy, z_floor, axis, root, layout, face):
         tile = layout["tile"]
         overlap = layout["overlap"]
         lower_a, lower_b = 0.0, layout["sill"] + overlap
@@ -296,18 +310,27 @@ class BuildingAssembler:
         z_lower = z_base + (lower_a + lower_b) * 0.5
         z_window = z_base + (win_a + win_b) * 0.5
         z_upper = z_base + (upper_a + upper_b) * 0.5
+
+        base_depth = settings.wall_thickness
+        trim_depth = max(0.03, min(base_depth * 0.55, base_depth - self.SURFACE_EPSILON))
+        glass_depth = max(0.02, min(base_depth * 0.22, trim_depth - self.SURFACE_EPSILON))
+        trim_outset = (base_depth - trim_depth) * 0.5 + self.SURFACE_EPSILON
+        glass_inset = (base_depth - glass_depth) * 0.5 + self.SURFACE_EPSILON
+        trim_wx, trim_wy = self._offset_on_face(face, wx, wy, trim_outset)
+        glass_wx, glass_wy = self._offset_on_face(face, wx, wy, -glass_inset)
+
         if axis == "x":
-            self.add_box("wall", tile, settings.wall_thickness, lower_h, (wx, wy, z_lower))
-            self.add_box("trim", tile, settings.wall_thickness, upper_h, (wx, wy, z_upper))
-            self.add_box("trim", left_w, settings.wall_thickness, win_h, (wx + (left_a + left_b) * 0.5, wy, z_window))
-            self.add_box("trim", right_w, settings.wall_thickness, win_h, (wx + (right_a + right_b) * 0.5, wy, z_window))
-            self.add_box("glass", glass_w, settings.wall_thickness * 0.35, win_h, (wx + (glass_a + glass_b) * 0.5, wy + outward_sign * settings.wall_thickness * 0.25, z_window))
+            self.add_box("wall", tile, base_depth, lower_h, (wx, wy, z_lower))
+            self.add_box("trim", tile, trim_depth, upper_h, (trim_wx, trim_wy, z_upper))
+            self.add_box("trim", left_w, trim_depth, win_h, (trim_wx + (left_a + left_b) * 0.5, trim_wy, z_window))
+            self.add_box("trim", right_w, trim_depth, win_h, (trim_wx + (right_a + right_b) * 0.5, trim_wy, z_window))
+            self.add_box("glass", glass_w, glass_depth, win_h, (glass_wx + (glass_a + glass_b) * 0.5, glass_wy, z_window))
         else:
-            self.add_box("wall", settings.wall_thickness, tile, lower_h, (wx, wy, z_lower))
-            self.add_box("trim", settings.wall_thickness, tile, upper_h, (wx, wy, z_upper))
-            self.add_box("trim", settings.wall_thickness, left_w, win_h, (wx, wy + (left_a + left_b) * 0.5, z_window))
-            self.add_box("trim", settings.wall_thickness, right_w, win_h, (wx, wy + (right_a + right_b) * 0.5, z_window))
-            self.add_box("glass", settings.wall_thickness * 0.35, glass_w, win_h, (wx + outward_sign * settings.wall_thickness * 0.25, wy + (glass_a + glass_b) * 0.5, z_window))
+            self.add_box("wall", base_depth, tile, lower_h, (wx, wy, z_lower))
+            self.add_box("trim", trim_depth, tile, upper_h, (trim_wx, trim_wy, z_upper))
+            self.add_box("trim", trim_depth, left_w, win_h, (trim_wx, trim_wy + (left_a + left_b) * 0.5, z_window))
+            self.add_box("trim", trim_depth, right_w, win_h, (trim_wx, trim_wy + (right_a + right_b) * 0.5, z_window))
+            self.add_box("glass", glass_depth, glass_w, win_h, (glass_wx, glass_wy + (glass_a + glass_b) * 0.5, z_window))
 
     def build_outer_walls(self, settings, shape, style, root, floor_profile):
         z_floor = floor_profile.z_floor
@@ -424,8 +447,7 @@ class BuildingAssembler:
         if layout is None:
             return False
         axis = "x" if face in {"front", "back"} else "y"
-        outward = {"front": +1, "back": -1, "left": -1, "right": +1}[face]
-        self.add_window_parts(settings, wx, wy, z_floor, axis, outward, root, layout)
+        self.add_window_parts(settings, wx, wy, z_floor, axis, root, layout, face)
         return True
 
     def _build_full_wall(self, face, settings, tile, wx, wy, z_floor_world):
@@ -438,15 +460,17 @@ class BuildingAssembler:
     def _build_service_bay_overlay(self, face, settings, style, tile, wx, wy, z_floor_world):
         panel_h = settings.floor_height * (0.3 + getattr(style, "accent_strength", 0.5) * 0.16)
         panel_z = z_floor_world + settings.window_sill_h + panel_h * 0.55
+        ox, oy = self._offset_on_face(face, wx, wy, settings.wall_thickness * 0.28 + self.SURFACE_EPSILON)
+        depth = max(0.02, settings.wall_thickness * 0.32)
         if face in {"front", "back"}:
-            self.add_box("trim", tile * 0.82, settings.wall_thickness * 0.4, panel_h, (wx, wy, panel_z))
+            self.add_box("trim", tile * 0.82, depth, panel_h, (ox, oy, panel_z))
         else:
-            self.add_box("trim", settings.wall_thickness * 0.4, tile * 0.82, panel_h, (wx, wy, panel_z))
+            self.add_box("trim", depth, tile * 0.82, panel_h, (ox, oy, panel_z))
 
     def _build_recessed_strip(self, face, settings, style, tile, wx, wy, z_floor_world):
         strip_h = settings.floor_height * 0.8
         strip_z = z_floor_world + settings.floor_height * 0.52
-        recess = settings.wall_thickness * (0.18 + getattr(style, "vertical_fins", 0.5) * 0.2)
+        recess = settings.wall_thickness * (0.18 + getattr(style, "vertical_fins", 0.5) * 0.2) + self.SURFACE_EPSILON
         if face == "front":
             self.add_box("trim", tile * 0.26, settings.wall_thickness * 0.2, strip_h, (wx, wy + recess, strip_z))
         elif face == "back":
@@ -464,16 +488,20 @@ class BuildingAssembler:
         canopy_factor = 0.25 if entry_style == "FLAT" else (0.65 if entry_style == "RECESSED" else 0.9)
         frame_factor = 0.2 if entry_style == "FLAT" else (0.6 if entry_style == "RECESSED" else 0.85)
         depth_sign = -1.0 if face == "front" else 1.0
-        door_plane_y = wy + depth_sign * recess_depth
+        door_plane_y = wy + depth_sign * min(settings.wall_thickness * 0.25, recess_depth * 0.4)
 
         side = (tile - dw) * 0.5
         if side > 0.05:
-            self.add_box("trim", side, settings.wall_thickness, dh, (wx - dw * 0.5 - side * 0.5, wy, root.location.z + z_floor + dh * 0.5))
-            self.add_box("trim", side, settings.wall_thickness, dh, (wx + dw * 0.5 + side * 0.5, wy, root.location.z + z_floor + dh * 0.5))
+            trim_depth = max(0.03, settings.wall_thickness * 0.45)
+            ox, oy = self._offset_on_face(face, wx, wy, (settings.wall_thickness - trim_depth) * 0.5 + self.SURFACE_EPSILON)
+            self.add_box("trim", side, trim_depth, dh, (ox - dw * 0.5 - side * 0.5, oy, root.location.z + z_floor + dh * 0.5))
+            self.add_box("trim", side, trim_depth, dh, (ox + dw * 0.5 + side * 0.5, oy, root.location.z + z_floor + dh * 0.5))
         top_h = settings.floor_height - dh
         if top_h > 0.05:
-            self.add_box("trim", tile, settings.wall_thickness, top_h, (wx, wy, root.location.z + z_floor + dh + top_h * 0.5))
-        self.add_box("glass", dw * 0.9, settings.wall_thickness * 0.35, dh * 0.92, (wx, door_plane_y, root.location.z + z_floor + dh * 0.5))
+            trim_depth = max(0.03, settings.wall_thickness * 0.45)
+            ox, oy = self._offset_on_face(face, wx, wy, (settings.wall_thickness - trim_depth) * 0.5 + self.SURFACE_EPSILON)
+            self.add_box("trim", tile, trim_depth, top_h, (ox, oy, root.location.z + z_floor + dh + top_h * 0.5))
+        self.add_box("glass", dw * 0.9, max(0.02, settings.wall_thickness * 0.2), dh * 0.92, (wx, door_plane_y, root.location.z + z_floor + dh * 0.5))
 
         if frame_factor > 0.3:
             frame_w = settings.wall_thickness * (0.5 + frame_factor * 0.9)
