@@ -47,6 +47,61 @@ class BuildingAssembler:
             root.location.z + z,
         ))
 
+    def local_rect_to_world(self, shape, root, rect, x, y, z):
+        x0, y0, _, _ = rect
+        return self.local_to_world(shape, root, x0 + x, y0 + y, z)
+
+    def _rectangles_from_cells(self, cells, tile):
+        remaining = set(cells)
+        rects = []
+        while remaining:
+            sx, sy = min(remaining)
+            ex = sx + 1
+            while (ex, sy) in remaining:
+                ex += 1
+            ey = sy + 1
+            growing = True
+            while growing:
+                for ix in range(sx, ex):
+                    if (ix, ey) not in remaining:
+                        growing = False
+                        break
+                if growing:
+                    ey += 1
+            for ix in range(sx, ex):
+                for iy in range(sy, ey):
+                    remaining.discard((ix, iy))
+            rects.append((sx * tile, sy * tile, ex * tile, ey * tile))
+        return rects
+
+    def _boundary_runs(self, cells, tile):
+        cells = set(cells)
+        by_face = {"front": {}, "back": {}, "left": {}, "right": {}}
+        for ix, iy in cells:
+            if (ix, iy - 1) not in cells:
+                by_face["front"].setdefault(iy * tile, []).append(ix)
+            if (ix, iy + 1) not in cells:
+                by_face["back"].setdefault((iy + 1) * tile, []).append(ix)
+            if (ix - 1, iy) not in cells:
+                by_face["left"].setdefault(ix * tile, []).append(iy)
+            if (ix + 1, iy) not in cells:
+                by_face["right"].setdefault((ix + 1) * tile, []).append(iy)
+
+        runs = {"front": [], "back": [], "left": [], "right": []}
+        for face, lines in by_face.items():
+            for fixed, vals in lines.items():
+                vals = sorted(set(vals))
+                start = vals[0]
+                prev = vals[0]
+                for v in vals[1:]:
+                    if v == prev + 1:
+                        prev = v
+                        continue
+                    runs[face].append((fixed, start * tile, (prev + 1) * tile))
+                    start = prev = v
+                runs[face].append((fixed, start * tile, (prev + 1) * tile))
+        return runs
+
     def add_ring_parts(self, shape, root, z_center, thickness, x0, y0, x1, y1, group):
         if y0 > 0:
             self.add_box(group, shape.width_m, y0, thickness, self.local_to_world(shape, root, shape.width_m * 0.5, y0 * 0.5, z_center))
@@ -62,13 +117,41 @@ class BuildingAssembler:
             sy = y1 - y0
             self.add_box(group, sx, sy, thickness, self.local_to_world(shape, root, x1 + sx * 0.5, y0 + sy * 0.5, z_center))
 
+    def _add_volume_shell(self, shape, root, block, z0, floors, settings):
+        if floors <= 0:
+            return
+        h = floors * settings.floor_height
+        cx = (block.x0 + block.x1) * 0.5
+        cy = (block.y0 + block.y1) * 0.5
+        self.add_box("wall", block.x1 - block.x0, block.y1 - block.y0, h, self.local_to_world(shape, root, cx, cy, z0 + h * 0.5))
+        self.add_box("roof", block.x1 - block.x0, block.y1 - block.y0, settings.slab_thickness, self.local_to_world(shape, root, cx, cy, z0 + h + settings.slab_thickness * 0.5))
+
+    def _build_auxiliary_volumes(self, settings, shape, style, root):
+        for block in getattr(shape, "volume_blocks", ()):
+            if block.role == "main":
+                continue
+            self._add_volume_shell(shape, root, block, block.floor_start * settings.floor_height, block.floor_count, settings)
+            if block.role == "upper":
+                self._build_terrace_guard(shape, root, block, settings)
+
+    def _build_terrace_guard(self, shape, root, upper_block, settings):
+        rail_h = max(0.28, settings.parapet_height * 0.9)
+        z = settings.floor_height + settings.slab_thickness + rail_h * 0.5
+        t = max(0.05, settings.parapet_thickness * 0.7)
+        if upper_block.x0 > shape.tile_size:
+            self.add_box("trim", upper_block.x0, t, rail_h, self.local_to_world(shape, root, upper_block.x0 * 0.5, t * 0.5, z))
+        if upper_block.x1 < shape.width_m - shape.tile_size:
+            span = shape.width_m - upper_block.x1
+            self.add_box("trim", span, t, rail_h, self.local_to_world(shape, root, upper_block.x1 + span * 0.5, t * 0.5, z))
+
     @staticmethod
     def _rects_overlap(a, b):
         return not (a[2] <= b[0] or a[0] >= b[2] or a[3] <= b[1] or a[1] >= b[3])
 
-    def _safe_roof_rect(self, shape, settings):
+    def _safe_roof_rect(self, shape, settings, roof_rect=None):
+        rx0, ry0, rx1, ry1 = roof_rect if roof_rect is not None else (0.0, 0.0, shape.width_m, shape.depth_m)
         inset = max(settings.parapet_thickness + 0.06, settings.wall_thickness * 0.35)
-        return (inset, inset, max(inset + 0.1, shape.width_m - inset), max(inset + 0.1, shape.depth_m - inset))
+        return (rx0 + inset, ry0 + inset, max(rx0 + inset + 0.1, rx1 - inset), max(ry0 + inset + 0.1, ry1 - inset))
 
     def _add_roof_box_if_valid(self, shape, root, rect, z_bottom, h, group, avoid_rects):
         x0, y0, x1, y1 = rect
@@ -86,8 +169,11 @@ class BuildingAssembler:
         )
         return True
 
-    def _build_roof_silhouette(self, settings, shape, style, root, roof_z, blocked_rects, rng):
+    def _build_roof_silhouette(self, settings, shape, style, root, roof_z, blocked_rects, rng, roof_rect=None):
         profile = getattr(style, "roof_profile_preference", getattr(settings, "roof_profile", "RAISED_PARAPET"))
+        rx0, ry0, rx1, ry1 = roof_rect if roof_rect is not None else (0.0, 0.0, shape.width_m, shape.depth_m)
+        rw = rx1 - rx0
+        rd = ry1 - ry0
         parapet_h = settings.parapet_height
         parapet_t = settings.parapet_thickness
         if profile == "FLAT":
@@ -100,17 +186,17 @@ class BuildingAssembler:
             parapet_h *= 1.0
 
         top_z = roof_z + parapet_h * 0.5
-        self.add_box("trim", shape.width_m, parapet_t, parapet_h, self.local_to_world(shape, root, shape.width_m * 0.5, 0.0, top_z))
-        self.add_box("trim", shape.width_m, parapet_t, parapet_h, self.local_to_world(shape, root, shape.width_m * 0.5, shape.depth_m, top_z))
-        self.add_box("trim", parapet_t, shape.depth_m, parapet_h, self.local_to_world(shape, root, 0.0, shape.depth_m * 0.5, top_z))
-        self.add_box("trim", parapet_t, shape.depth_m, parapet_h, self.local_to_world(shape, root, shape.width_m, shape.depth_m * 0.5, top_z))
+        self.add_box("trim", rw, parapet_t, parapet_h, self.local_to_world(shape, root, rx0 + rw * 0.5, ry0, top_z))
+        self.add_box("trim", rw, parapet_t, parapet_h, self.local_to_world(shape, root, rx0 + rw * 0.5, ry1, top_z))
+        self.add_box("trim", parapet_t, rd, parapet_h, self.local_to_world(shape, root, rx0, ry0 + rd * 0.5, top_z))
+        self.add_box("trim", parapet_t, rd, parapet_h, self.local_to_world(shape, root, rx1, ry0 + rd * 0.5, top_z))
 
-        safe = self._safe_roof_rect(shape, settings)
+        safe = self._safe_roof_rect(shape, settings, roof_rect=roof_rect)
 
         if profile == "STEPPED_PARAPET":
             step_h = max(0.08, parapet_h * 0.32)
             step_t = max(parapet_t * 0.85, settings.wall_thickness * 0.22)
-            step_len = max(shape.tile_size * 1.2, shape.width_m * 0.22)
+            step_len = max(shape.tile_size * 1.2, rw * 0.22)
             y_front = safe[1] + step_t * 0.5
             y_back = safe[3] - step_t * 0.5
             z = roof_z + parapet_h + step_h * 0.5
@@ -122,8 +208,8 @@ class BuildingAssembler:
             self.add_box("trim", step_len, step_t, step_h, self.local_to_world(shape, root, x_b, y_back, z))
 
         if profile in {"ACCESS_VOLUME", "RAISED_PARAPET"}:
-            vol_w = max(shape.tile_size * 1.2, min(shape.width_m * 0.28, shape.width_m - shape.tile_size * 2.0))
-            vol_d = max(shape.tile_size * 1.1, min(shape.depth_m * 0.22, shape.depth_m - shape.tile_size * 2.0))
+            vol_w = max(shape.tile_size * 1.2, min(rw * 0.28, rw - shape.tile_size * 2.0))
+            vol_d = max(shape.tile_size * 1.1, min(rd * 0.22, rd - shape.tile_size * 2.0))
             vol_h = max(settings.floor_height * 0.32, 0.9)
             side = "front" if rng.random() < 0.5 else "back"
             y0 = safe[1] + 0.45 if side == "front" else safe[3] - vol_d - 0.45
@@ -140,13 +226,13 @@ class BuildingAssembler:
 
         return parapet_h
 
-    def _build_rooftop_equipment(self, settings, shape, style, root, roof_z, blocked_rects, rng):
+    def _build_rooftop_equipment(self, settings, shape, style, root, roof_z, blocked_rects, rng, roof_rect=None):
         density = max(0.0, min(1.0, getattr(style, "roof_detail_density", getattr(settings, "roof_detail_density", 0.5))))
         amount = max(0, int(getattr(settings, "rooftop_equipment_amount", 0)))
         if density <= 0.01 or amount <= 0:
             return
 
-        safe = self._safe_roof_rect(shape, settings)
+        safe = self._safe_roof_rect(shape, settings, roof_rect=roof_rect)
         layout_mode = rng.choice(("central", "offset", "sparse"))
         spawn = max(1, round(amount * (0.5 + density * 0.9)))
         if layout_mode == "sparse":
@@ -207,8 +293,8 @@ class BuildingAssembler:
                 center = self.local_to_world(shape, root, px, py, roof_z + 0.01)
                 self._place_rooftop_utility_asset(settings, center.x, center.y, roof_z + 0.01)
 
-    def _build_top_floor_accents(self, settings, shape, style, root, roof_z, blocked_rects, rng):
-        safe = self._safe_roof_rect(shape, settings)
+    def _build_top_floor_accents(self, settings, shape, style, root, roof_z, blocked_rects, rng, roof_rect=None):
+        safe = self._safe_roof_rect(shape, settings, roof_rect=roof_rect)
         if getattr(style, "roof_profile_preference", "RAISED_PARAPET") == "FLAT":
             choice = rng.choice(("setback", "setback", "utility"))
         elif getattr(style, "roof_profile_preference", "RAISED_PARAPET") == "STEPPED_PARAPET":
@@ -332,20 +418,23 @@ class BuildingAssembler:
             self.add_box("trim", trim_depth, right_w, win_h, (trim_wx, trim_wy + (right_a + right_b) * 0.5, z_window))
             self.add_box("glass", glass_depth, glass_w, win_h, (glass_wx, glass_wy + (glass_a + glass_b) * 0.5, z_window))
 
-    def build_outer_walls(self, settings, shape, style, root, floor_profile):
+    def build_outer_walls(self, settings, shape, style, root, floor_profile, footprint_rect=None):
         z_floor = floor_profile.z_floor
         tile = shape.tile_size
+        fx0, fy0, fx1, fy1 = footprint_rect if footprint_rect is not None else (0.0, 0.0, shape.width_m, shape.depth_m)
+        fwidth = fx1 - fx0
+        fdepth = fy1 - fy0
 
         front_stack = style.facade_stack_for_side(
             floor_profile,
             "front",
-            shape.width_m,
+            fwidth,
             tile,
             require_center_entrance=floor_profile.is_ground,
         )
-        back_stack = style.facade_stack_for_side(floor_profile, "back", shape.width_m, tile)
-        left_stack = style.facade_stack_for_side(floor_profile, "left", shape.depth_m, tile)
-        right_stack = style.facade_stack_for_side(floor_profile, "right", shape.depth_m, tile)
+        back_stack = style.facade_stack_for_side(floor_profile, "back", fwidth, tile)
+        left_stack = style.facade_stack_for_side(floor_profile, "left", fdepth, tile)
+        right_stack = style.facade_stack_for_side(floor_profile, "right", fdepth, tile)
 
         front_slots = front_stack.slot_modules(tile)
         back_slots = back_stack.slot_modules(tile)
@@ -354,8 +443,8 @@ class BuildingAssembler:
 
         for ix, (front_module, back_module) in enumerate(zip(front_slots, back_slots)):
             cx = ix * tile + tile * 0.5
-            front_pos = self.local_to_world(shape, root, cx, 0.0, z_floor)
-            back_pos = self.local_to_world(shape, root, cx, shape.depth_m, z_floor)
+            front_pos = self.local_rect_to_world(shape, root, (fx0, fy0, fx1, fy1), cx, 0.0, z_floor)
+            back_pos = self.local_rect_to_world(shape, root, (fx0, fy0, fx1, fy1), cx, fdepth, z_floor)
 
             for face, p, y_sign, module in (
                 ("front", front_pos, -1, front_module),
@@ -366,8 +455,8 @@ class BuildingAssembler:
 
         for iy, (left_module, right_module) in enumerate(zip(left_slots, right_slots)):
             cy = iy * tile + tile * 0.5
-            left_pos = self.local_to_world(shape, root, 0.0, cy, z_floor)
-            right_pos = self.local_to_world(shape, root, shape.width_m, cy, z_floor)
+            left_pos = self.local_rect_to_world(shape, root, (fx0, fy0, fx1, fy1), 0.0, cy, z_floor)
+            right_pos = self.local_rect_to_world(shape, root, (fx0, fy0, fx1, fy1), fwidth, cy, z_floor)
 
             for face, p, x_sign, module in (
                 ("left", left_pos, -1, left_module),
@@ -376,8 +465,40 @@ class BuildingAssembler:
                 wx, wy = p.x + x_sign * settings.wall_thickness * 0.5, p.y
                 self._build_facade_module(settings, shape, style, root, z_floor, face, wx, wy, module)
 
-        self._build_horizontal_accents(settings, shape, style, floor_profile, root)
-        self._build_vertical_accents(settings, shape, style, floor_profile, root, front_slots, back_slots, left_slots, right_slots)
+        self._build_horizontal_accents(settings, shape, style, floor_profile, root, footprint_rect=(fx0, fy0, fx1, fy1))
+        self._build_vertical_accents(settings, shape, style, floor_profile, root, front_slots, back_slots, left_slots, right_slots, footprint_rect=(fx0, fy0, fx1, fy1))
+
+    def build_outer_walls_cells(self, settings, shape, style, root, floor_profile, cells):
+        tile = shape.tile_size
+        z_floor = floor_profile.z_floor
+        runs = self._boundary_runs(cells, tile)
+
+        for face in ("front", "back", "left", "right"):
+            for fixed, a0, a1 in runs[face]:
+                side_w = max(tile, a1 - a0)
+                stack = style.facade_stack_for_side(
+                    floor_profile,
+                    face,
+                    side_w,
+                    tile,
+                    require_center_entrance=floor_profile.is_ground and face == "front",
+                )
+                slots = stack.slot_modules(tile)
+                for idx, module in enumerate(slots):
+                    c = a0 + idx * tile + tile * 0.5
+                    if face == "front":
+                        p = self.local_to_world(shape, root, c, fixed, z_floor)
+                        wx, wy = p.x, p.y - settings.wall_thickness * 0.5
+                    elif face == "back":
+                        p = self.local_to_world(shape, root, c, fixed, z_floor)
+                        wx, wy = p.x, p.y + settings.wall_thickness * 0.5
+                    elif face == "left":
+                        p = self.local_to_world(shape, root, fixed, c, z_floor)
+                        wx, wy = p.x - settings.wall_thickness * 0.5, p.y
+                    else:
+                        p = self.local_to_world(shape, root, fixed, c, z_floor)
+                        wx, wy = p.x + settings.wall_thickness * 0.5, p.y
+                    self._build_facade_module(settings, shape, style, root, z_floor, face, wx, wy, module)
 
     def _build_facade_module(self, settings, shape, style, root, z_floor, face, wx, wy, module):
         module_id = module.id
@@ -486,10 +607,12 @@ class BuildingAssembler:
     def _build_entrance_module(self, settings, style, root, z_floor, face, wx, wy, tile):
         dw = settings.door_width
         dh = settings.door_height
-        entry_style = getattr(style, "entrance_preference", getattr(settings, "entrance_style", "RECESSED"))
-        recess_depth = settings.wall_thickness * (1.4 if entry_style in {"RECESSED", "BOLD"} else 0.55)
-        canopy_factor = 0.25 if entry_style == "FLAT" else (0.65 if entry_style == "RECESSED" else 0.9)
-        frame_factor = 0.2 if entry_style == "FLAT" else (0.6 if entry_style == "RECESSED" else 0.85)
+        entry_style = getattr(style, "entrance_preference", getattr(settings, "entrance_style", "RECESSED_ENTRY"))
+        legacy_map = {"RECESSED": "RECESSED_ENTRY", "FLAT": "FRAMED_PORTAL", "BOLD": "CANOPY_COLUMNS"}
+        entry_style = legacy_map.get(entry_style, entry_style)
+        recess_depth = settings.wall_thickness * (1.55 if entry_style in {"RECESSED_ENTRY", "STAIR_REVEAL"} else 0.65)
+        canopy_factor = 0.25 if entry_style == "FRAMED_PORTAL" else (0.9 if entry_style in {"CANOPY_COLUMNS", "STAIR_REVEAL"} else 0.65)
+        frame_factor = 0.5 if entry_style == "RECESSED_ENTRY" else (0.75 if entry_style == "FRAMED_PORTAL" else 0.9)
         depth_sign = -1.0 if face == "front" else 1.0
         door_plane_y = wy + depth_sign * min(settings.wall_thickness * 0.25, recess_depth * 0.4)
 
@@ -522,6 +645,16 @@ class BuildingAssembler:
                 0.08,
                 (wx, wy + depth_sign * depth * 0.5, root.location.z + z_floor + min(settings.floor_height - 0.1, settings.canopy_height)),
             )
+        if entry_style in {"CANOPY_COLUMNS", "STAIR_REVEAL"}:
+            col_w = max(0.08, settings.wall_thickness * 0.42)
+            col_h = min(settings.floor_height - 0.05, dh + 0.45)
+            ycol = wy + depth_sign * max(0.2, settings.canopy_depth * 0.35)
+            self.add_box("trim", col_w, col_w, col_h, (wx - dw * 0.65, ycol, root.location.z + z_floor + col_h * 0.5))
+            self.add_box("trim", col_w, col_w, col_h, (wx + dw * 0.65, ycol, root.location.z + z_floor + col_h * 0.5))
+        if entry_style == "STAIR_REVEAL":
+            step_h = 0.09
+            for i in range(3):
+                self.add_box("floor", dw + 1.0 + i * 0.26, 0.32, step_h, (wx, wy + depth_sign * (0.62 + i * 0.28), root.location.z + z_floor + step_h * (i + 0.5)))
 
     def _build_balcony_variant(self, settings, style, root, z_floor, face, wx, wy, tile):
         style_seed = int(settings.seed) * 237 + int(round((wx + wy + z_floor) * 10.0))
@@ -539,7 +672,7 @@ class BuildingAssembler:
             rail_y = wy + (-settings.wall_thickness * 0.45 if face == "front" else settings.wall_thickness * 0.45)
             self.add_box("trim", tile * 0.76, settings.wall_thickness * 0.26, rail_h, (wx, rail_y, root.location.z + z_floor + settings.window_sill_h + rail_h * 0.5))
 
-    def _build_horizontal_accents(self, settings, shape, style, floor_profile, root):
+    def _build_horizontal_accents(self, settings, shape, style, floor_profile, root, footprint_rect=None):
         z_floor = floor_profile.z_floor
         band_density = getattr(style, "band_density", getattr(settings, "band_density", 0.5))
         strength = getattr(style, "accent_strength", getattr(settings, "accent_strength", 0.5))
@@ -548,22 +681,25 @@ class BuildingAssembler:
         band_t = settings.wall_thickness * (0.22 + strength * 0.48)
         if band_density > 0.15:
             z = z_floor + settings.floor_height + settings.slab_thickness * 0.5
-            self._add_perimeter_band(settings, shape, root, z, band_t, "trim")
+            self._add_perimeter_band(settings, shape, root, z, band_t, "trim", footprint_rect=footprint_rect)
         if band_density > 0.28:
             z = z_floor + settings.window_sill_h
-            self._add_perimeter_band(settings, shape, root, z, band_t * 0.7, "trim")
+            self._add_perimeter_band(settings, shape, root, z, band_t * 0.7, "trim", footprint_rect=footprint_rect)
         if floor_profile.is_top:
             z = z_floor + settings.floor_height + settings.parapet_height * 0.2
-            self._add_perimeter_band(settings, shape, root, z, band_t * 1.2, "roof")
+            self._add_perimeter_band(settings, shape, root, z, band_t * 1.2, "roof", footprint_rect=footprint_rect)
 
-    def _add_perimeter_band(self, settings, shape, root, z, thickness, group):
+    def _add_perimeter_band(self, settings, shape, root, z, thickness, group, footprint_rect=None):
+        fx0, fy0, fx1, fy1 = footprint_rect if footprint_rect is not None else (0.0, 0.0, shape.width_m, shape.depth_m)
+        fw = fx1 - fx0
+        fd = fy1 - fy0
         h = max(0.04, thickness)
-        self.add_box(group, shape.width_m, thickness, h, self.local_to_world(shape, root, shape.width_m * 0.5, 0.0, z))
-        self.add_box(group, shape.width_m, thickness, h, self.local_to_world(shape, root, shape.width_m * 0.5, shape.depth_m, z))
-        self.add_box(group, thickness, shape.depth_m, h, self.local_to_world(shape, root, 0.0, shape.depth_m * 0.5, z))
-        self.add_box(group, thickness, shape.depth_m, h, self.local_to_world(shape, root, shape.width_m, shape.depth_m * 0.5, z))
+        self.add_box(group, fw, thickness, h, self.local_to_world(shape, root, fx0 + fw * 0.5, fy0, z))
+        self.add_box(group, fw, thickness, h, self.local_to_world(shape, root, fx0 + fw * 0.5, fy1, z))
+        self.add_box(group, thickness, fd, h, self.local_to_world(shape, root, fx0, fy0 + fd * 0.5, z))
+        self.add_box(group, thickness, fd, h, self.local_to_world(shape, root, fx1, fy0 + fd * 0.5, z))
 
-    def _build_vertical_accents(self, settings, shape, style, floor_profile, root, front_slots, back_slots, left_slots, right_slots):
+    def _build_vertical_accents(self, settings, shape, style, floor_profile, root, front_slots, back_slots, left_slots, right_slots, footprint_rect=None):
         fin_strength = getattr(style, "vertical_fins", getattr(settings, "vertical_fins", 0.45))
         if fin_strength <= 0.01:
             return
@@ -572,6 +708,7 @@ class BuildingAssembler:
         fin_d = settings.wall_thickness * (0.24 + fin_strength * 0.55)
         fin_h = settings.floor_height * (0.75 + fin_strength * 0.2)
 
+        fx0, fy0, fx1, fy1 = footprint_rect if footprint_rect is not None else (0.0, 0.0, shape.width_m, shape.depth_m)
         def add_fin(face, cx, cy):
             if face == "front":
                 self.add_box("trim", fin_w, fin_d, fin_h, (cx, cy - fin_d * 0.5, root.location.z + z))
@@ -584,20 +721,20 @@ class BuildingAssembler:
 
         for ix, module in enumerate(front_slots):
             if module.id in {"SolidWallBayModule", "RecessedStripModule", "ServiceBayModule"}:
-                cx = self.local_to_world(shape, root, ix * settings.tile_size + settings.tile_size * 0.5, 0.0, 0.0).x
-                add_fin("front", cx, self.local_to_world(shape, root, 0.0, 0.0, 0.0).y)
+                cx = self.local_to_world(shape, root, fx0 + ix * settings.tile_size + settings.tile_size * 0.5, fy0, 0.0).x
+                add_fin("front", cx, self.local_to_world(shape, root, fx0, fy0, 0.0).y)
         for ix, module in enumerate(back_slots):
             if module.id in {"SolidWallBayModule", "RecessedStripModule", "ServiceBayModule"}:
-                cx = self.local_to_world(shape, root, ix * settings.tile_size + settings.tile_size * 0.5, shape.depth_m, 0.0).x
-                add_fin("back", cx, self.local_to_world(shape, root, 0.0, shape.depth_m, 0.0).y)
+                cx = self.local_to_world(shape, root, fx0 + ix * settings.tile_size + settings.tile_size * 0.5, fy1, 0.0).x
+                add_fin("back", cx, self.local_to_world(shape, root, fx0, fy1, 0.0).y)
         for iy, module in enumerate(left_slots):
             if module.id in {"SolidWallBayModule", "RecessedStripModule", "ServiceBayModule"}:
-                cy = self.local_to_world(shape, root, 0.0, iy * settings.tile_size + settings.tile_size * 0.5, 0.0).y
-                add_fin("left", self.local_to_world(shape, root, 0.0, 0.0, 0.0).x, cy)
+                cy = self.local_to_world(shape, root, fx0, fy0 + iy * settings.tile_size + settings.tile_size * 0.5, 0.0).y
+                add_fin("left", self.local_to_world(shape, root, fx0, fy0, 0.0).x, cy)
         for iy, module in enumerate(right_slots):
             if module.id in {"SolidWallBayModule", "RecessedStripModule", "ServiceBayModule"}:
-                cy = self.local_to_world(shape, root, shape.width_m, iy * settings.tile_size + settings.tile_size * 0.5, 0.0).y
-                add_fin("right", self.local_to_world(shape, root, shape.width_m, 0.0, 0.0).x, cy)
+                cy = self.local_to_world(shape, root, fx1, fy0 + iy * settings.tile_size + settings.tile_size * 0.5, 0.0).y
+                add_fin("right", self.local_to_world(shape, root, fx1, fy0, 0.0).x, cy)
 
     def _place_asset_module(self, settings, module_id, face, wx, wy, z_floor_world):
         asset_module = resolve_asset_module(settings, module_id)
@@ -749,31 +886,49 @@ class BuildingAssembler:
         for floor_profile in shape.floor_profiles:
             z_floor = floor_profile.z_floor
             x0, y0, x1, y1 = shape.stair_opening
+            fx0, fy0, fx1, fy1 = shape.floor_footprints[floor_profile.floor_index] if getattr(shape, "floor_footprints", None) else (0.0, 0.0, shape.width_m, shape.depth_m)
+            fw = max(shape.tile_size * 2, fx1 - fx0)
+            fd = max(shape.tile_size * 2, fy1 - fy0)
+            floor_cells = set(shape.floor_cells[floor_profile.floor_index]) if getattr(shape, "floor_cells", None) else set()
+            stair_inside = fx0 <= x0 and fy0 <= y0 and fx1 >= x1 and fy1 >= y1
+            use_cell_shell = bool(floor_cells)
 
             if floor_profile.is_ground:
-                self.add_box(
-                    "floor",
-                    shape.width_m,
-                    shape.depth_m,
-                    settings.slab_thickness,
-                    self.local_to_world(shape, root, shape.width_m * 0.5, shape.depth_m * 0.5, z_floor - settings.slab_thickness * 0.5),
-                )
+                if use_cell_shell:
+                    for rx0, ry0, rx1, ry1 in self._rectangles_from_cells(floor_cells, shape.tile_size):
+                        self.add_box("floor", rx1 - rx0, ry1 - ry0, settings.slab_thickness, self.local_to_world(shape, root, (rx0 + rx1) * 0.5, (ry0 + ry1) * 0.5, z_floor - settings.slab_thickness * 0.5))
+                else:
+                    self.add_box("floor", fw, fd, settings.slab_thickness, self.local_to_world(shape, root, fx0 + fw * 0.5, fy0 + fd * 0.5, z_floor - settings.slab_thickness * 0.5))
             else:
-                self.add_ring_parts(shape, root, z_floor - settings.slab_thickness * 0.5, settings.slab_thickness, x0, y0, x1, y1, "floor")
+                if use_cell_shell:
+                    for rx0, ry0, rx1, ry1 in self._rectangles_from_cells(floor_cells, shape.tile_size):
+                        self.add_box("floor", rx1 - rx0, ry1 - ry0, settings.slab_thickness, self.local_to_world(shape, root, (rx0 + rx1) * 0.5, (ry0 + ry1) * 0.5, z_floor - settings.slab_thickness * 0.5))
+                elif stair_inside:
+                    self.add_ring_parts(shape, root, z_floor - settings.slab_thickness * 0.5, settings.slab_thickness, x0, y0, x1, y1, "floor")
+                else:
+                    self.add_box("floor", fw, fd, settings.slab_thickness, self.local_to_world(shape, root, fx0 + fw * 0.5, fy0 + fd * 0.5, z_floor - settings.slab_thickness * 0.5))
 
             if not floor_profile.is_top:
-                self.add_ring_parts(shape, root, z_floor + settings.floor_height + settings.slab_thickness * 0.5, settings.slab_thickness, x0, y0, x1, y1, "trim")
+                if use_cell_shell:
+                    for rx0, ry0, rx1, ry1 in self._rectangles_from_cells(floor_cells, shape.tile_size):
+                        self.add_box("trim", rx1 - rx0, ry1 - ry0, settings.slab_thickness, self.local_to_world(shape, root, (rx0 + rx1) * 0.5, (ry0 + ry1) * 0.5, z_floor + settings.floor_height + settings.slab_thickness * 0.5))
+                elif stair_inside:
+                    self.add_ring_parts(shape, root, z_floor + settings.floor_height + settings.slab_thickness * 0.5, settings.slab_thickness, x0, y0, x1, y1, "trim")
+                else:
+                    self.add_box("trim", fw, fd, settings.slab_thickness, self.local_to_world(shape, root, fx0 + fw * 0.5, fy0 + fd * 0.5, z_floor + settings.floor_height + settings.slab_thickness * 0.5))
             else:
-                self.add_box(
-                    "roof",
-                    shape.width_m,
-                    shape.depth_m,
-                    settings.slab_thickness,
-                    self.local_to_world(shape, root, shape.width_m * 0.5, shape.depth_m * 0.5, z_floor + settings.floor_height + settings.slab_thickness * 0.5),
-                )
+                if use_cell_shell:
+                    for rx0, ry0, rx1, ry1 in self._rectangles_from_cells(floor_cells, shape.tile_size):
+                        self.add_box("roof", rx1 - rx0, ry1 - ry0, settings.slab_thickness, self.local_to_world(shape, root, (rx0 + rx1) * 0.5, (ry0 + ry1) * 0.5, z_floor + settings.floor_height + settings.slab_thickness * 0.5))
+                else:
+                    self.add_box("roof", fw, fd, settings.slab_thickness, self.local_to_world(shape, root, fx0 + fw * 0.5, fy0 + fd * 0.5, z_floor + settings.floor_height + settings.slab_thickness * 0.5))
 
-            self.build_outer_walls(settings, shape, style, root, floor_profile)
-            self.build_inner_walls(settings, shape, root, floor_profile)
+            if use_cell_shell:
+                self.build_outer_walls_cells(settings, shape, style, root, floor_profile, floor_cells)
+            else:
+                self.build_outer_walls(settings, shape, style, root, floor_profile, footprint_rect=(fx0, fy0, fx1, fy1))
+            if floor_profile.is_ground and stair_inside:
+                self.build_inner_walls(settings, shape, root, floor_profile)
 
             if floor_profile.is_ground:
                 self.add_box(
@@ -781,15 +936,16 @@ class BuildingAssembler:
                     2.4,
                     1.4,
                     0.04,
-                    self.local_to_world(shape, root, shape.width_m * 0.5, settings.wall_thickness + 1.2, z_floor + 0.02),
+                    self.local_to_world(shape, root, fx0 + fw * 0.5, fy0 + settings.wall_thickness + 1.2, z_floor + 0.02),
                 )
 
-            if not floor_profile.is_top:
+            if (not use_cell_shell) and (not floor_profile.is_top) and stair_inside:
                 self.build_stairs(settings, shape, root, floor_profile)
 
         roof_z = shape.floors * settings.floor_height
-        blocked_rects = [shape.stair_opening]
+        top_rect = shape.floor_footprints[-1] if getattr(shape, "floor_footprints", None) else (0.0, 0.0, shape.width_m, shape.depth_m)
+        blocked_rects = [shape.stair_opening] if (top_rect[0] <= shape.stair_opening[0] and top_rect[1] <= shape.stair_opening[1] and top_rect[2] >= shape.stair_opening[2] and top_rect[3] >= shape.stair_opening[3]) else []
         rng = random.Random((int(settings.seed) * 73856093) ^ (shape.floors * 19349663) ^ int(shape.width_m * 100) ^ (int(shape.depth_m * 100) << 1))
-        self._build_roof_silhouette(settings, shape, style, root, roof_z, blocked_rects, rng)
-        self._build_rooftop_equipment(settings, shape, style, root, roof_z, blocked_rects, rng)
-        self._build_top_floor_accents(settings, shape, style, root, roof_z, blocked_rects, rng)
+        self._build_roof_silhouette(settings, shape, style, root, roof_z, blocked_rects, rng, roof_rect=top_rect)
+        self._build_rooftop_equipment(settings, shape, style, root, roof_z, blocked_rects, rng, roof_rect=top_rect)
+        self._build_top_floor_accents(settings, shape, style, root, roof_z, blocked_rects, rng, roof_rect=top_rect)

@@ -50,17 +50,17 @@ class BuildingGenerator:
             int(settings.floors), int(settings.room_count), int(settings.seed),
             round(settings.tile_size, 4), round(settings.floor_height, 4),
             round(settings.slab_thickness, 4), round(settings.stairs_width, 4),
-            round(settings.stair_opening_margin, 4), bool(fast_mode),
+            round(settings.stair_opening_margin, 4), str(getattr(settings, 'style_preset', '')), bool(fast_mode),
         )
 
     def resolve_shape(self, settings, rebuild_shape):
-        sig = self.shape_signature(settings, self.fast_mode)
-        if rebuild_shape or BuildingGenerator._cached_shape is None or BuildingGenerator._cached_shape_sig != sig:
-            shape = BuildingShape.from_settings(settings, self.fast_mode)
-            BuildingGenerator._cached_shape = shape
-            BuildingGenerator._cached_shape_sig = sig
-            return shape
-        return BuildingGenerator._cached_shape
+        # Recompute shape every build to avoid stale geometry artifacts when
+        # width/depth controllers are edited rapidly in interactive mode.
+        # The low-rise scope keeps this cost acceptable, while correctness wins.
+        shape = BuildingShape.from_settings(settings, self.fast_mode)
+        BuildingGenerator._cached_shape = shape
+        BuildingGenerator._cached_shape_sig = self.shape_signature(settings, self.fast_mode)
+        return shape
 
     def build(self, quality="full", rebuild_shape=True):
         settings, root, handle = self.get_state()

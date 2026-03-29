@@ -103,9 +103,15 @@ class BuildingStyle:
     @classmethod
     def from_settings(cls, settings, fast_mode: bool) -> "BuildingStyle":
         side_prob = 0.45 if fast_mode else 0.7
-        preset = str(getattr(settings, "style_preset", "SCIENTIST_HOUSING"))
-        if preset == "SERVICE_BLOCK":
+        preset = str(getattr(settings, "style_preset", "MINIMAL_MODERN_VILLA"))
+        if preset in {"SERVICE_BLOCK"}:
             preset = "SERVICE_RESIDENCE"
+        if preset in {"SCIENTIST_HOUSING"}:
+            preset = "MINIMAL_MODERN_VILLA"
+        elif preset in {"TECHNICIAN_HOUSING"}:
+            preset = "COMPACT_URBAN_HOUSE"
+        elif preset in {"SECURITY_HOUSING"}:
+            preset = "SECURITY_RESIDENCE"
         preset_data = cls._preset_controls(preset)
         ground, typical, top = cls._preset_profiles(preset)
         facade_variation = cls._clamp01(float(getattr(settings, "facade_variation", settings.detail_amount)) * 0.55 + preset_data["facade_variation"] * 0.45)
@@ -129,7 +135,7 @@ class BuildingStyle:
             accent_strength=accent_strength,
             band_density=band_density,
             vertical_fins=vertical_fins,
-            entrance_style=str(getattr(settings, "entrance_style", "RECESSED")),
+            entrance_style=str(getattr(settings, "entrance_style", "RECESSED_ENTRY")),
             balcony_floor_mask=cls._balcony_floor_mask(
                 floors=int(settings.floors),
                 seed=int(settings.seed),
@@ -330,7 +336,7 @@ class BuildingStyle:
     @classmethod
     def _preset_profiles(cls, preset: str) -> tuple[GroundFloorProfile, TypicalFloorProfile, TopFloorProfile]:
         presets = {
-            "SCIENTIST_HOUSING": cls._make_profiles(
+            "MINIMAL_MODERN_VILLA": cls._make_profiles(
                 ground=dict(
                     allowed=("SolidWallModule", "SolidWallBayModule", "StandardWindowModule", "NarrowWindowBayModule", "WideWindowBayModule", "ServiceWallModule", "ServiceBayModule", "StairWindowModule", "AccentPanelModule", "RecessedStripModule"),
                     probs={"StandardWindowModule": 0.3, "NarrowWindowBayModule": 0.0, "WideWindowBayModule": 0.07, "ServiceWallModule": 0.13, "ServiceBayModule": 0.08, "StairWindowModule": 0.1, "AccentPanelModule": 0.1, "RecessedStripModule": 0.04},
@@ -353,7 +359,7 @@ class BuildingStyle:
                     accent=0.82,
                 ),
             ),
-            "TECHNICIAN_HOUSING": cls._make_profiles(
+            "COMPACT_URBAN_HOUSE": cls._make_profiles(
                 ground=dict(
                     allowed=("SolidWallModule", "SolidWallBayModule", "StandardWindowModule", "NarrowWindowBayModule", "WideWindowBayModule", "ServiceWallModule", "ServiceBayModule", "EntranceDoorModule", "StairWindowModule", "RecessedStripModule"),
                     probs={"StandardWindowModule": 0.23, "NarrowWindowBayModule": 0.0, "WideWindowBayModule": 0.06, "ServiceWallModule": 0.22, "ServiceBayModule": 0.12, "StairWindowModule": 0.13, "SolidWallModule": 0.1},
@@ -376,7 +382,30 @@ class BuildingStyle:
                     accent=0.56,
                 ),
             ),
-            "SECURITY_HOUSING": cls._make_profiles(
+            "TERRACE_HOUSE": cls._make_profiles(
+                ground=dict(
+                    allowed=("SolidWallModule", "SolidWallBayModule", "StandardWindowModule", "WideWindowBayModule", "ServiceWallModule", "ServiceBayModule", "StairWindowModule", "AccentPanelModule", "RecessedStripModule"),
+                    probs={"StandardWindowModule": 0.22, "WideWindowBayModule": 0.12, "ServiceWallModule": 0.12, "ServiceBayModule": 0.08, "SolidWallModule": 0.1, "StairWindowModule": 0.1, "AccentPanelModule": 0.1},
+                    glazing=0.68,
+                    balcony=0.1,
+                    accent=0.58,
+                ),
+                typical=dict(
+                    allowed=("SolidWallModule", "SolidWallBayModule", "StandardWindowModule", "WideWindowBayModule", "StairWindowModule", "BalconyModule", "AccentPanelModule", "RecessedStripModule"),
+                    probs={"StandardWindowModule": 0.24, "WideWindowBayModule": 0.14, "SolidWallModule": 0.1, "SolidWallBayModule": 0.08, "StairWindowModule": 0.08, "BalconyModule": 0.14, "AccentPanelModule": 0.08},
+                    glazing=0.78,
+                    balcony=0.36,
+                    accent=0.62,
+                ),
+                top=dict(
+                    allowed=("SolidWallModule", "SolidWallBayModule", "StandardWindowModule", "WideWindowBayModule", "BalconyModule", "AccentPanelModule", "RecessedStripModule"),
+                    probs={"StandardWindowModule": 0.18, "WideWindowBayModule": 0.15, "BalconyModule": 0.22, "AccentPanelModule": 0.14, "SolidWallModule": 0.1, "SolidWallBayModule": 0.07},
+                    glazing=0.72,
+                    balcony=0.52,
+                    accent=0.85,
+                ),
+            ),
+            "SECURITY_RESIDENCE": cls._make_profiles(
                 ground=dict(
                     allowed=("SolidWallModule", "SolidWallBayModule", "ServiceWallModule", "ServiceBayModule", "StandardWindowModule", "NarrowWindowBayModule", "AccentPanelModule", "RecessedStripModule"),
                     probs={"ServiceWallModule": 0.3, "ServiceBayModule": 0.14, "SolidWallModule": 0.2, "SolidWallBayModule": 0.12, "StandardWindowModule": 0.14, "NarrowWindowBayModule": 0.0, "AccentPanelModule": 0.04},
@@ -423,18 +452,18 @@ class BuildingStyle:
                 ),
             ),
         }
-        return presets.get(preset, presets["SCIENTIST_HOUSING"])
+        return presets.get(preset, presets["MINIMAL_MODERN_VILLA"])
 
     @classmethod
     def _preset_controls(cls, preset: str) -> dict:
         controls = {
-            "SCIENTIST_HOUSING": dict(
+            "MINIMAL_MODERN_VILLA": dict(
                 bay_rhythm="FINE",
                 glazing_bias=1.18,
                 facade_variation=0.74,
                 accent_strength=0.62,
                 balcony_preference=0.52,
-                entrance_style="RECESSED",
+                entrance_style="RECESSED_ENTRY",
                 roof_profile="RAISED_PARAPET",
                 roof_detail_density=0.68,
                 band_density=0.62,
@@ -443,13 +472,13 @@ class BuildingStyle:
                 trim_tint=(0.95, 0.98, 1.0),
                 accent_tint=(0.48, 0.71, 0.88),
             ),
-            "TECHNICIAN_HOUSING": dict(
+            "COMPACT_URBAN_HOUSE": dict(
                 bay_rhythm="MODULAR",
                 glazing_bias=0.95,
                 facade_variation=0.58,
                 accent_strength=0.46,
                 balcony_preference=0.32,
-                entrance_style="RECESSED",
+                entrance_style="RECESSED_ENTRY",
                 roof_profile="ACCESS_VOLUME",
                 roof_detail_density=0.72,
                 band_density=0.56,
@@ -458,13 +487,28 @@ class BuildingStyle:
                 trim_tint=(0.82, 0.85, 0.86),
                 accent_tint=(0.43, 0.56, 0.68),
             ),
-            "SECURITY_HOUSING": dict(
+            "TERRACE_HOUSE": dict(
+                bay_rhythm="MODULAR",
+                glazing_bias=1.08,
+                facade_variation=0.68,
+                accent_strength=0.64,
+                balcony_preference=0.66,
+                entrance_style="CANOPY_COLUMNS",
+                roof_profile="RAISED_PARAPET",
+                roof_detail_density=0.58,
+                band_density=0.52,
+                vertical_fins=0.44,
+                wall_tint=(0.94, 0.93, 0.91),
+                trim_tint=(0.86, 0.85, 0.83),
+                accent_tint=(0.32, 0.38, 0.45),
+            ),
+            "SECURITY_RESIDENCE": dict(
                 bay_rhythm="RIGID",
                 glazing_bias=0.78,
                 facade_variation=0.42,
                 accent_strength=0.58,
                 balcony_preference=0.08,
-                entrance_style="BOLD",
+                entrance_style="CANOPY_COLUMNS",
                 roof_profile="STEPPED_PARAPET",
                 roof_detail_density=0.46,
                 band_density=0.7,
@@ -479,7 +523,7 @@ class BuildingStyle:
                 facade_variation=0.38,
                 accent_strength=0.28,
                 balcony_preference=0.12,
-                entrance_style="FLAT",
+                entrance_style="FRAMED_PORTAL",
                 roof_profile="FLAT",
                 roof_detail_density=0.34,
                 band_density=0.3,
@@ -489,7 +533,7 @@ class BuildingStyle:
                 accent_tint=(0.45, 0.49, 0.53),
             ),
         }
-        return controls.get(preset, controls["SCIENTIST_HOUSING"])
+        return controls.get(preset, controls["MINIMAL_MODERN_VILLA"])
 
     @staticmethod
     def _clamp01(value: float) -> float:

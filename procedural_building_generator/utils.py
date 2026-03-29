@@ -38,9 +38,17 @@ def ensure_child_collection(parent, name, hidden=False):
 
 
 def clear_generated_objects(col):
-    for obj in list(col.objects):
-        if obj.get("generated_by") == GENERATOR_TAG:
-            bpy.data.objects.remove(obj, do_unlink=True)
+    def _clear_recursive(collection, seen):
+        if collection.name in seen:
+            return
+        seen.add(collection.name)
+        for obj in list(collection.objects):
+            if obj.get("generated_by") == GENERATOR_TAG:
+                bpy.data.objects.remove(obj, do_unlink=True)
+        for child in collection.children:
+            _clear_recursive(child, seen)
+
+    _clear_recursive(col, set())
 
 
 def ensure_empty(name, empty_type='PLAIN_AXES', location=(0, 0, 0)):
