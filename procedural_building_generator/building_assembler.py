@@ -926,25 +926,52 @@ class BuildingAssembler:
     def build_stairs(self, settings, shape, root, floor_profile):
         z_floor = floor_profile.z_floor
         zone = shape.stair_zone
+        opening = shape.stair_opening
         clear_h = settings.floor_height
         rise = max(0.05, settings.stairs_rise_step)
-        stair_w = min(settings.stairs_width, (zone.x1 - zone.x0) - 0.2)
+        min_landing_depth = 0.9
+        min_edge_clearance = 0.22
+        stair_w = min(settings.stairs_width, (zone.x1 - zone.x0) - 0.2, (opening[2] - opening[0]) - 0.18)
         n_steps = max(1, math.ceil(clear_h / rise))
         exact_rise = clear_h / n_steps
-        y_start = zone.y0 + 0.25
-        y_end = zone.y1 - 0.2
-        available_depth = max(0.8, y_end - y_start)
-        run = max(0.12, available_depth / n_steps)
+        y_start = max(zone.y0 + 0.25, opening[1] + min_edge_clearance)
+        opening_exit_limit = opening[3] - min_landing_depth
+        y_end = min(zone.y1 - min_edge_clearance, opening_exit_limit)
+        available_depth = max(0.0, y_end - y_start)
+        required_run_depth = max(0.12, settings.stairs_run_step) * n_steps
+        if available_depth <= 0.0:
+            y_end = min(zone.y1 - min_edge_clearance, opening[3] - min_edge_clearance)
+            available_depth = max(0.0, y_end - y_start)
+        run = max(0.12, available_depth / n_steps) if n_steps > 0 else 0.12
         x_mid = (zone.x0 + zone.x1) * 0.5
         for i in range(n_steps):
             z = z_floor + exact_rise * (i + 0.5)
             y = y_start + run * i
             self.add_box("floor", stair_w, run, exact_rise, self.local_to_world(shape, root, x_mid, y, z))
-        top_cap_y = min(zone.y1 - 0.25, y_start + run * n_steps)
+        top_cap_y = min(zone.y1 - min_edge_clearance, opening[3] - min_landing_depth * 0.5)
         top_cap_h = max(0.12, exact_rise)
         top_cap_z = z_floor + clear_h - top_cap_h * 0.5
-        self.add_box("floor", stair_w, max(0.28, run * 1.25), top_cap_h, self.local_to_world(shape, root, x_mid, top_cap_y, top_cap_z))
+        landing_depth = max(min_landing_depth, run * 1.35)
+        self.add_box("floor", stair_w, landing_depth, top_cap_h, self.local_to_world(shape, root, x_mid, top_cap_y, top_cap_z))
         stair_top_z = top_cap_z + top_cap_h * 0.5
+        flight_end_y = y_start + run * n_steps
+        opening_depth = opening[3] - opening[1]
+        required_opening_depth = required_run_depth + min_landing_depth + min_edge_clearance
+        print(
+            f"[PBG] stair debug floor {floor_profile.floor_index}: "
+            f"zone=({zone.x0:.2f},{zone.y0:.2f},{zone.x1:.2f},{zone.y1:.2f}) "
+            f"opening=({opening[0]:.2f},{opening[1]:.2f},{opening[2]:.2f},{opening[3]:.2f}) "
+            f"landing_depth={landing_depth:.2f} top_z={stair_top_z:.3f} next_walkable_z={z_floor + clear_h:.3f}"
+        )
+        if landing_depth < min_landing_depth:
+            print(f"[PBG][warn] stair landing depth too small: {landing_depth:.2f} < {min_landing_depth:.2f}")
+        if (opening[3] - flight_end_y) < min_edge_clearance:
+            print(f"[PBG][warn] stair flight ends too close to slab edge: clearance={opening[3] - flight_end_y:.2f}")
+        if opening_depth < required_opening_depth:
+            print(
+                f"[PBG][warn] stair opening depth smaller than required footprint: "
+                f"opening={opening_depth:.2f} required={required_opening_depth:.2f}"
+            )
         return stair_top_z
 
     def assemble(self, settings, shape, style, root):

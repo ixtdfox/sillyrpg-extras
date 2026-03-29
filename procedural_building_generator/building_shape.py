@@ -90,7 +90,10 @@ class BuildingShape:
             depth,
             floors,
             tile,
+            float(settings.floor_height),
             float(settings.stairs_width),
+            float(settings.stairs_run_step),
+            float(settings.stairs_rise_step),
             float(settings.stair_opening_margin),
             floor_cells,
         )
@@ -103,7 +106,10 @@ class BuildingShape:
                 depth,
                 floors,
                 tile,
+                float(settings.floor_height),
                 float(settings.stairs_width),
+                float(settings.stairs_run_step),
+                float(settings.stairs_rise_step),
                 float(settings.stair_opening_margin),
                 floor_cells,
             )
@@ -325,30 +331,102 @@ def _find_stair_zone(width: float, depth: float, tile: float, stairs_width: floa
     return None
 
 
-def resolve_stair_layout(width: float, depth: float, floors: int, tile: float, stairs_width: float, margin: float, floor_cells: tuple[tuple[tuple[int, int], ...], ...]) -> tuple[RectCell, tuple[float, float, float, float], str, str]:
-    zone = _find_stair_zone(width, depth, tile, stairs_width, floors, floor_cells)
+def _required_stair_zone_depth(floor_height: float, stairs_rise_step: float, stairs_run_step: float, landing_depth_min: float) -> float:
+    rise = max(0.05, stairs_rise_step)
+    run = max(0.12, stairs_run_step)
+    n_steps = max(1, math.ceil(floor_height / rise))
+    return n_steps * run + landing_depth_min + 0.35
+
+
+def _opening_from_zone(
+    zone: RectCell,
+    width: float,
+    depth: float,
+    margin: float,
+    min_y_depth: float,
+) -> tuple[float, float, float, float]:
+    x0 = max(0.0, zone.x0 - margin)
+    y0 = max(0.0, zone.y0 - margin)
+    x1 = min(width, zone.x1 + margin)
+    y1 = min(depth, zone.y1 + margin)
+    current_depth = y1 - y0
+    if current_depth < min_y_depth:
+        deficit = min_y_depth - current_depth
+        extend_front = min(y0, deficit)
+        y0 -= extend_front
+        deficit -= extend_front
+        if deficit > 0.0:
+            y1 = min(depth, y1 + deficit)
+    return (x0, y0, x1, y1)
+
+
+def _find_stair_zone_with_requirements(
+    width: float,
+    depth: float,
+    tile: float,
+    required_width: float,
+    required_depth: float,
+    floors: int,
+    floor_cells: tuple[tuple[tuple[int, int], ...], ...],
+) -> RectCell | None:
+    stair_w_tiles = max(2, int(math.ceil(required_width / tile)))
+    stair_d_tiles = max(4, int(math.ceil(required_depth / tile)))
+    if floors <= 1:
+        return RectCell(tile, tile, tile + stair_w_tiles * tile, tile + stair_d_tiles * tile)
+    shared = set(floor_cells[0]) if floor_cells else set()
+    for f in range(1, floors):
+        shared &= set(floor_cells[f])
+    if not shared:
+        return None
+    nx = max(1, int(round(width / tile)))
+    ny = max(1, int(round(depth / tile)))
+    for iy in range(0, ny - stair_d_tiles + 1):
+        for ix in range(0, nx - stair_w_tiles + 1):
+            ok = True
+            for tx in range(ix, ix + stair_w_tiles):
+                for ty in range(iy, iy + stair_d_tiles):
+                    if (tx, ty) not in shared:
+                        ok = False
+                        break
+                if not ok:
+                    break
+            if ok:
+                return RectCell(ix * tile, iy * tile, (ix + stair_w_tiles) * tile, (iy + stair_d_tiles) * tile)
+    return None
+
+
+def resolve_stair_layout(
+    width: float,
+    depth: float,
+    floors: int,
+    tile: float,
+    floor_height: float,
+    stairs_width: float,
+    stairs_run_step: float,
+    stairs_rise_step: float,
+    margin: float,
+    floor_cells: tuple[tuple[tuple[int, int], ...], ...],
+) -> tuple[RectCell, tuple[float, float, float, float], str, str]:
+    landing_depth_min = 0.9
+    internal_min_margin = max(tile * 0.25, 0.16)
+    required_zone_w = max(stairs_width + 0.25, tile * 2)
+    required_zone_d = _required_stair_zone_depth(floor_height, stairs_rise_step, stairs_run_step, landing_depth_min)
+    min_opening_depth = required_zone_d + max(internal_min_margin, margin)
+    zone = _find_stair_zone_with_requirements(width, depth, tile, required_zone_w, required_zone_d, floors, floor_cells)
     if zone is None and floors > 1:
         single = _tier_c_blocks(width, depth, floors)
         fallback_cells = tuple(build_floor_cells(width, depth, tile, floors, single))
-        zone = _find_stair_zone(width, depth, tile, stairs_width, floors, fallback_cells)
+        zone = _find_stair_zone_with_requirements(width, depth, tile, required_zone_w, required_zone_d, floors, fallback_cells)
         if zone is None:
-            zone = RectCell(tile, tile, tile + max(tile * 2, stairs_width), tile + tile * 4)
-        opening = (
-            max(0.0, zone.x0 - margin),
-            max(0.0, zone.y0 - margin),
-            min(width, zone.x1 + margin),
-            min(depth, zone.y1 + margin),
-        )
+            zone = RectCell(tile, tile, min(width, tile + max(tile * 2, required_zone_w)), min(depth, tile + max(tile * 4, required_zone_d)))
+        effective_margin = max(margin, internal_min_margin)
+        opening = _opening_from_zone(zone, width, depth, effective_margin, min_opening_depth)
         return zone, opening, "fallback-main-block", "stair placement failed in composed shape -> fallback to simpler main block"
 
     if zone is None:
-        zone = RectCell(tile, tile, tile + max(tile * 2, stairs_width), tile + tile * 4)
-    opening = (
-        max(0.0, zone.x0 - margin),
-        max(0.0, zone.y0 - margin),
-        min(width, zone.x1 + margin),
-        min(depth, zone.y1 + margin),
-    )
+        zone = RectCell(tile, tile, min(width, tile + max(tile * 2, required_zone_w)), min(depth, tile + max(tile * 4, required_zone_d)))
+    effective_margin = max(margin, internal_min_margin)
+    opening = _opening_from_zone(zone, width, depth, effective_margin, min_opening_depth)
     return zone, opening, "ok", ""
 
 
