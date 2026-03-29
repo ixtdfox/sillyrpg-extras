@@ -177,6 +177,7 @@ def sanitize_parameters(settings, fast_mode: bool = False) -> SanitizedSettings:
     values["window_head_h"] = head
     values["minimum_window_clearance"] = MIN_WINDOW_CLEARANCE
     values["window_overlap"] = 0.015
+    values["module_overlap"] = 0.004
 
     window_valid = (head - sill) >= WINDOW_FALLBACK_MIN_HEIGHT and (head <= max_head + 1e-6)
     values["window_is_valid"] = window_valid
