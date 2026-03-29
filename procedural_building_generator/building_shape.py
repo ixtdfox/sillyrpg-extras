@@ -90,7 +90,10 @@ class BuildingShape:
             depth,
             floors,
             tile,
+            float(settings.floor_height),
             float(settings.stairs_width),
+            float(settings.stairs_run_step),
+            float(settings.stairs_rise_step),
             float(settings.stair_opening_margin),
             floor_cells,
         )
@@ -103,15 +106,21 @@ class BuildingShape:
                 depth,
                 floors,
                 tile,
+                float(settings.floor_height),
                 float(settings.stairs_width),
+                float(settings.stairs_run_step),
+                float(settings.stairs_rise_step),
                 float(settings.stair_opening_margin),
                 floor_cells,
             )
             if tier != "C":
                 tier = "C"
+            print("[PBG] stair fallback engaged: switched composition to tier C for stair continuity")
         fallback = fallback_reason
         if stair_fallback_reason:
             fallback = f"{fallback} | {stair_fallback_reason}" if fallback else stair_fallback_reason
+        if fallback:
+            print(f"[PBG] shape fallback reason: {fallback}")
 
         return cls(
             width_m=width,
@@ -156,20 +165,6 @@ def build_volume_blocks(width: float, depth: float, floors: int, tile: float, se
     main_y0 = 0.0 if rng.random() < 0.7 else _snap_tile((depth - main_d) * rng.random() * 0.45, tile)
     main_x0, main_y0, main_x1, main_y1 = _clamp_rect((main_x0, main_y0, main_x0 + main_w, main_y0 + main_d), width, depth, tile)
     main = VolumeBlock("main", main_x0, main_y0, main_x1, main_y1, 0, floors)
-    if floors >= 2:
-        # Robustness over variety for multi-floor houses:
-        # keep a coherent full-height mass, but preserve one attached wing.
-        wing_w = _snap_tile(max(tile * 2, width * (0.2 + rng.random() * 0.1)), tile)
-        wing_d = _snap_tile(max(tile * 3, depth * (0.42 + rng.random() * 0.18)), tile)
-        left_side = rng.random() < 0.5
-        wing_y0 = max(0.0, min(depth - wing_d, main.y0 + (main.depth - wing_d) * 0.5))
-        if left_side:
-            rect = (max(0.0, main.x0 - wing_w + tile), wing_y0, main.x0 + tile, wing_y0 + wing_d)
-        else:
-            rect = (main.x1 - tile, wing_y0, min(width, main.x1 + wing_w - tile), wing_y0 + wing_d)
-        wx0, wy0, wx1, wy1 = _clamp_rect(rect, width, depth, tile)
-        wing = VolumeBlock("utility", wx0, wy0, wx1, wy1, 0, floors)
-        return (main, wing, VolumeBlock("upper", main.x0, main.y0, main.x1, main.y1, 1, floors - 1))
     blocks = [main]
 
     entrance_w = _snap_tile(max(tile * 2, main.width * (0.35 + rng.random() * 0.2)), tile)
@@ -192,13 +187,18 @@ def build_volume_blocks(width: float, depth: float, floors: int, tile: float, se
         else:
             side_rect = (min(width - tile * 2, main.x1 - tile), side_y0, min(width, main.x1 + side_w - tile), side_y0 + side_d)
         sx0, sy0, sx1, sy1 = _clamp_rect(side_rect, width, depth, tile)
-        blocks.append(VolumeBlock("utility", sx0, sy0, sx1, sy1, 0, 1))
+        side_floors = floors if (floors >= 2 and rng.random() < 0.45) else 1
+        blocks.append(VolumeBlock("utility", sx0, sy0, sx1, sy1, 0, side_floors))
 
     if floors >= 2:
-        # Robustness-first rule:
-        # keep upper floors aligned with main mass so external walls are always present
-        # and stair-to-floor continuity stays predictable.
-        blocks.append(VolumeBlock("upper", main.x0, main.y0, main.x1, main.y1, 1, floors - 1))
+        shrink_x = tile if main.width >= tile * 6 and rng.random() < 0.65 else 0.0
+        shrink_y = tile if main.depth >= tile * 6 and rng.random() < 0.65 else 0.0
+        ux0 = min(main.x1 - tile * 2, main.x0 + shrink_x)
+        uy0 = min(main.y1 - tile * 2, main.y0 + shrink_y)
+        ux1 = max(ux0 + tile * 2, main.x1 - shrink_x)
+        uy1 = max(uy0 + tile * 2, main.y1 - shrink_y)
+        ux0, uy0, ux1, uy1 = _clamp_rect((ux0, uy0, ux1, uy1), width, depth, tile)
+        blocks.append(VolumeBlock("upper", ux0, uy0, ux1, uy1, 1, floors - 1))
 
     # safety: keep 2-4 blocks and deterministic order
     dedup = {}
@@ -325,29 +325,118 @@ def _find_stair_zone(width: float, depth: float, tile: float, stairs_width: floa
     return None
 
 
-def resolve_stair_layout(width: float, depth: float, floors: int, tile: float, stairs_width: float, margin: float, floor_cells: tuple[tuple[tuple[int, int], ...], ...]) -> tuple[RectCell, tuple[float, float, float, float], str, str]:
-    zone = _find_stair_zone(width, depth, tile, stairs_width, floors, floor_cells)
+def _required_stair_zone_depth(floor_height: float, stairs_rise_step: float, stairs_run_step: float, landing_depth_min: float) -> float:
+    rise = max(0.05, stairs_rise_step)
+    run = max(0.12, stairs_run_step)
+    n_steps = max(1, math.ceil(floor_height / rise))
+    return n_steps * run + landing_depth_min + 0.35
+
+
+def _opening_from_zone(
+    zone: RectCell,
+    width: float,
+    depth: float,
+    margin: float,
+    min_y_depth: float,
+) -> tuple[float, float, float, float]:
+    x0 = max(0.0, zone.x0 - margin)
+    y0 = max(0.0, zone.y0 - margin)
+    x1 = min(width, zone.x1 + margin)
+    y1 = min(depth, zone.y1 + margin)
+    current_depth = y1 - y0
+    if current_depth < min_y_depth:
+        deficit = min_y_depth - current_depth
+        extend_front = min(y0, deficit)
+        y0 -= extend_front
+        deficit -= extend_front
+        if deficit > 0.0:
+            y1 = min(depth, y1 + deficit)
+    return (x0, y0, x1, y1)
+
+
+def _find_stair_zone_with_requirements(
+    width: float,
+    depth: float,
+    tile: float,
+    required_width: float,
+    required_depth: float,
+    floors: int,
+    floor_cells: tuple[tuple[tuple[int, int], ...], ...],
+) -> RectCell | None:
+    stair_w_tiles = max(2, int(math.ceil(required_width / tile)))
+    stair_d_tiles = max(4, int(math.ceil(required_depth / tile)))
+    if floors <= 1:
+        return RectCell(tile, tile, tile + stair_w_tiles * tile, tile + stair_d_tiles * tile)
+    shared = set(floor_cells[0]) if floor_cells else set()
+    for f in range(1, floors):
+        shared &= set(floor_cells[f])
+    if not shared:
+        return None
+    nx = max(1, int(round(width / tile)))
+    ny = max(1, int(round(depth / tile)))
+    for iy in range(0, ny - stair_d_tiles + 1):
+        for ix in range(0, nx - stair_w_tiles + 1):
+            ok = True
+            for tx in range(ix, ix + stair_w_tiles):
+                for ty in range(iy, iy + stair_d_tiles):
+                    if (tx, ty) not in shared:
+                        ok = False
+                        break
+                if not ok:
+                    break
+            if ok:
+                return RectCell(ix * tile, iy * tile, (ix + stair_w_tiles) * tile, (iy + stair_d_tiles) * tile)
+    return None
+
+
+def resolve_stair_layout(
+    width: float,
+    depth: float,
+    floors: int,
+    tile: float,
+    floor_height: float,
+    stairs_width: float,
+    stairs_run_step: float,
+    stairs_rise_step: float,
+    margin: float,
+    floor_cells: tuple[tuple[tuple[int, int], ...], ...],
+) -> tuple[RectCell, tuple[float, float, float, float], str, str]:
+    landing_depth_min = 0.9
+    internal_min_margin = max(tile * 0.25, 0.16)
+    required_zone_w = max(stairs_width + 0.25, tile * 2)
+    required_zone_d = _required_stair_zone_depth(floor_height, stairs_rise_step, stairs_run_step, landing_depth_min)
+    min_opening_depth = required_zone_d + max(internal_min_margin, margin)
+    print(
+        f"[PBG] resolve_stair_layout params: floor_h={floor_height:.2f} run={stairs_run_step:.3f} "
+        f"rise={stairs_rise_step:.3f} width={stairs_width:.2f} margin={margin:.2f} required_depth={required_zone_d:.2f}"
+    )
+    zone = _find_stair_zone_with_requirements(width, depth, tile, required_zone_w, required_zone_d, floors, floor_cells)
+    if zone is None and floors > 1:
+        relaxed_depth = max(tile * 4, required_zone_d - tile)
+        zone = _find_stair_zone_with_requirements(width, depth, tile, required_zone_w, relaxed_depth, floors, floor_cells)
+        if zone is not None:
+            print(f"[PBG] resolve_stair_layout: using compact stair zone depth={relaxed_depth:.2f} after primary search miss")
     if zone is None and floors > 1:
         single = _tier_c_blocks(width, depth, floors)
         fallback_cells = tuple(build_floor_cells(width, depth, tile, floors, single))
-        zone = _find_stair_zone(width, depth, tile, stairs_width, floors, fallback_cells)
+        zone = _find_stair_zone_with_requirements(width, depth, tile, required_zone_w, required_zone_d, floors, fallback_cells)
         if zone is None:
-            zone = RectCell(tile, tile, tile + max(tile * 2, stairs_width), tile + tile * 4)
-        opening = (
-            max(0.0, zone.x0 - margin),
-            max(0.0, zone.y0 - margin),
-            min(width, zone.x1 + margin),
-            min(depth, zone.y1 + margin),
+            zone = RectCell(tile, tile, min(width, tile + max(tile * 2, required_zone_w)), min(depth, tile + max(tile * 4, required_zone_d)))
+        effective_margin = max(margin, internal_min_margin)
+        opening = _opening_from_zone(zone, width, depth, effective_margin, min_opening_depth)
+        print(
+            f"[PBG] resolve_stair_layout result: zone=({zone.x0:.2f},{zone.y0:.2f},{zone.x1:.2f},{zone.y1:.2f}) "
+            f"opening=({opening[0]:.2f},{opening[1]:.2f},{opening[2]:.2f},{opening[3]:.2f}) fallback=tier-c"
         )
         return zone, opening, "fallback-main-block", "stair placement failed in composed shape -> fallback to simpler main block"
 
     if zone is None:
-        zone = RectCell(tile, tile, tile + max(tile * 2, stairs_width), tile + tile * 4)
-    opening = (
-        max(0.0, zone.x0 - margin),
-        max(0.0, zone.y0 - margin),
-        min(width, zone.x1 + margin),
-        min(depth, zone.y1 + margin),
+        zone = RectCell(tile, tile, min(width, tile + max(tile * 2, required_zone_w)), min(depth, tile + max(tile * 4, required_zone_d)))
+    effective_margin = max(margin, internal_min_margin)
+    opening = _opening_from_zone(zone, width, depth, effective_margin, min_opening_depth)
+    print(
+        f"[PBG] resolve_stair_layout result: zone=({zone.x0:.2f},{zone.y0:.2f},{zone.x1:.2f},{zone.y1:.2f}) "
+        f"opening=({opening[0]:.2f},{opening[1]:.2f},{opening[2]:.2f},{opening[3]:.2f}) fallback=none"
     )
     return zone, opening, "ok", ""
 
