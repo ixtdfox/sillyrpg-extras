@@ -181,6 +181,13 @@ def build_volume_blocks(width: float, depth: float, floors: int, tile: float, se
         blocks.append(VolumeBlock("utility", sx0, sy0, sx1, sy1, 0, 1))
 
     if floors >= 2:
+        if floors >= 3:
+            blocks.append(VolumeBlock("upper", main.x0, main.y0, main.x1, main.y1, 1, floors - 1))
+            dedup = {}
+            for block in blocks:
+                key = (block.role, block.floor_start, block.floor_count, round(block.x0, 3), round(block.y0, 3), round(block.x1, 3), round(block.y1, 3))
+                dedup[key] = block
+            return tuple(list(dedup.values())[:4])
         upper_w = _snap_tile(max(tile * 2, main.width * (0.62 + rng.random() * 0.28)), tile)
         upper_d = _snap_tile(max(tile * 2, main.depth * (0.58 + rng.random() * 0.26)), tile)
         max_shift_x = max(0.0, main.width - upper_w)
