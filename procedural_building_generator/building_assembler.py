@@ -891,44 +891,43 @@ class BuildingAssembler:
             fd = max(shape.tile_size * 2, fy1 - fy0)
             floor_cells = set(shape.floor_cells[floor_profile.floor_index]) if getattr(shape, "floor_cells", None) else set()
             stair_inside = fx0 <= x0 and fy0 <= y0 and fx1 >= x1 and fy1 >= y1
+            use_cell_shell = bool(floor_cells)
 
             if floor_profile.is_ground:
-                if floor_cells:
+                if use_cell_shell:
                     for rx0, ry0, rx1, ry1 in self._rectangles_from_cells(floor_cells, shape.tile_size):
                         self.add_box("floor", rx1 - rx0, ry1 - ry0, settings.slab_thickness, self.local_to_world(shape, root, (rx0 + rx1) * 0.5, (ry0 + ry1) * 0.5, z_floor - settings.slab_thickness * 0.5))
                 else:
                     self.add_box("floor", fw, fd, settings.slab_thickness, self.local_to_world(shape, root, fx0 + fw * 0.5, fy0 + fd * 0.5, z_floor - settings.slab_thickness * 0.5))
             else:
-                if stair_inside:
+                if use_cell_shell:
+                    for rx0, ry0, rx1, ry1 in self._rectangles_from_cells(floor_cells, shape.tile_size):
+                        self.add_box("floor", rx1 - rx0, ry1 - ry0, settings.slab_thickness, self.local_to_world(shape, root, (rx0 + rx1) * 0.5, (ry0 + ry1) * 0.5, z_floor - settings.slab_thickness * 0.5))
+                elif stair_inside:
                     self.add_ring_parts(shape, root, z_floor - settings.slab_thickness * 0.5, settings.slab_thickness, x0, y0, x1, y1, "floor")
                 else:
-                    if floor_cells:
-                        for rx0, ry0, rx1, ry1 in self._rectangles_from_cells(floor_cells, shape.tile_size):
-                            self.add_box("floor", rx1 - rx0, ry1 - ry0, settings.slab_thickness, self.local_to_world(shape, root, (rx0 + rx1) * 0.5, (ry0 + ry1) * 0.5, z_floor - settings.slab_thickness * 0.5))
-                    else:
-                        self.add_box("floor", fw, fd, settings.slab_thickness, self.local_to_world(shape, root, fx0 + fw * 0.5, fy0 + fd * 0.5, z_floor - settings.slab_thickness * 0.5))
+                    self.add_box("floor", fw, fd, settings.slab_thickness, self.local_to_world(shape, root, fx0 + fw * 0.5, fy0 + fd * 0.5, z_floor - settings.slab_thickness * 0.5))
 
             if not floor_profile.is_top:
-                if stair_inside:
+                if use_cell_shell:
+                    for rx0, ry0, rx1, ry1 in self._rectangles_from_cells(floor_cells, shape.tile_size):
+                        self.add_box("trim", rx1 - rx0, ry1 - ry0, settings.slab_thickness, self.local_to_world(shape, root, (rx0 + rx1) * 0.5, (ry0 + ry1) * 0.5, z_floor + settings.floor_height + settings.slab_thickness * 0.5))
+                elif stair_inside:
                     self.add_ring_parts(shape, root, z_floor + settings.floor_height + settings.slab_thickness * 0.5, settings.slab_thickness, x0, y0, x1, y1, "trim")
                 else:
-                    if floor_cells:
-                        for rx0, ry0, rx1, ry1 in self._rectangles_from_cells(floor_cells, shape.tile_size):
-                            self.add_box("trim", rx1 - rx0, ry1 - ry0, settings.slab_thickness, self.local_to_world(shape, root, (rx0 + rx1) * 0.5, (ry0 + ry1) * 0.5, z_floor + settings.floor_height + settings.slab_thickness * 0.5))
-                    else:
-                        self.add_box("trim", fw, fd, settings.slab_thickness, self.local_to_world(shape, root, fx0 + fw * 0.5, fy0 + fd * 0.5, z_floor + settings.floor_height + settings.slab_thickness * 0.5))
+                    self.add_box("trim", fw, fd, settings.slab_thickness, self.local_to_world(shape, root, fx0 + fw * 0.5, fy0 + fd * 0.5, z_floor + settings.floor_height + settings.slab_thickness * 0.5))
             else:
-                if floor_cells:
+                if use_cell_shell:
                     for rx0, ry0, rx1, ry1 in self._rectangles_from_cells(floor_cells, shape.tile_size):
                         self.add_box("roof", rx1 - rx0, ry1 - ry0, settings.slab_thickness, self.local_to_world(shape, root, (rx0 + rx1) * 0.5, (ry0 + ry1) * 0.5, z_floor + settings.floor_height + settings.slab_thickness * 0.5))
                 else:
                     self.add_box("roof", fw, fd, settings.slab_thickness, self.local_to_world(shape, root, fx0 + fw * 0.5, fy0 + fd * 0.5, z_floor + settings.floor_height + settings.slab_thickness * 0.5))
 
-            if floor_cells:
+            if use_cell_shell:
                 self.build_outer_walls_cells(settings, shape, style, root, floor_profile, floor_cells)
             else:
                 self.build_outer_walls(settings, shape, style, root, floor_profile, footprint_rect=(fx0, fy0, fx1, fy1))
-            if stair_inside:
+            if floor_profile.is_ground and stair_inside:
                 self.build_inner_walls(settings, shape, root, floor_profile)
 
             if floor_profile.is_ground:
@@ -940,7 +939,7 @@ class BuildingAssembler:
                     self.local_to_world(shape, root, fx0 + fw * 0.5, fy0 + settings.wall_thickness + 1.2, z_floor + 0.02),
                 )
 
-            if not floor_profile.is_top and stair_inside:
+            if (not use_cell_shell) and (not floor_profile.is_top) and stair_inside:
                 self.build_stairs(settings, shape, root, floor_profile)
 
         roof_z = shape.floors * settings.floor_height
