@@ -54,13 +54,13 @@ class BuildingGenerator:
         )
 
     def resolve_shape(self, settings, rebuild_shape):
-        sig = self.shape_signature(settings, self.fast_mode)
-        if rebuild_shape or BuildingGenerator._cached_shape is None or BuildingGenerator._cached_shape_sig != sig:
-            shape = BuildingShape.from_settings(settings, self.fast_mode)
-            BuildingGenerator._cached_shape = shape
-            BuildingGenerator._cached_shape_sig = sig
-            return shape
-        return BuildingGenerator._cached_shape
+        # Recompute shape every build to avoid stale geometry artifacts when
+        # width/depth controllers are edited rapidly in interactive mode.
+        # The low-rise scope keeps this cost acceptable, while correctness wins.
+        shape = BuildingShape.from_settings(settings, self.fast_mode)
+        BuildingGenerator._cached_shape = shape
+        BuildingGenerator._cached_shape_sig = self.shape_signature(settings, self.fast_mode)
+        return shape
 
     def build(self, quality="full", rebuild_shape=True):
         settings, root, handle = self.get_state()
