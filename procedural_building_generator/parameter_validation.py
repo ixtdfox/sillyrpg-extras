@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from .utils import clamp
@@ -85,12 +86,16 @@ def sanitize_parameters(settings, fast_mode: bool = False) -> SanitizedSettings:
     values["tile_size"] = tile_size
 
     min_footprint = max(MIN_FOOTPRINT_M, tile_size * 4.0)
-    width = max(float(settings.width_m), min_footprint)
-    depth = max(float(settings.depth_m), min_footprint)
+    width_raw = max(float(settings.width_m), min_footprint)
+    depth_raw = max(float(settings.depth_m), min_footprint)
+    width_tiles = max(4, int(math.ceil(width_raw / tile_size)))
+    depth_tiles = max(4, int(math.ceil(depth_raw / tile_size)))
+    width = width_tiles * tile_size
+    depth = depth_tiles * tile_size
     if width != float(settings.width_m):
-        warnings.append(f"width_m was clamped from {float(settings.width_m):.3f} to {width:.3f} (minimum supported footprint).")
+        warnings.append(f"width_m was clamped from {float(settings.width_m):.3f} to {width:.3f} (minimum supported footprint / tile aligned).")
     if depth != float(settings.depth_m):
-        warnings.append(f"depth_m was clamped from {float(settings.depth_m):.3f} to {depth:.3f} (minimum supported footprint).")
+        warnings.append(f"depth_m was clamped from {float(settings.depth_m):.3f} to {depth:.3f} (minimum supported footprint / tile aligned).")
     values["width_m"] = width
     values["depth_m"] = depth
 

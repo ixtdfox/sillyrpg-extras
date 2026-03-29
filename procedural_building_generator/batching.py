@@ -1,4 +1,6 @@
+import bmesh
 import bpy
+import math
 
 from .utils import GENERATOR_TAG, world_box
 
@@ -21,10 +23,19 @@ class MeshBatcher:
                 continue
             mesh = bpy.data.meshes.new(f"{group}_mesh")
             mesh.from_pydata(payload["verts"], [], payload["faces"])
+            bm = bmesh.new()
+            bm.from_mesh(mesh)
+            bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-6)
+            bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+            bm.to_mesh(mesh)
+            bm.free()
             mesh.update()
-            if smooth:
-                for poly in mesh.polygons:
-                    poly.use_smooth = True
+            mesh.validate(clean_customdata=True)
+            mesh.use_auto_smooth = True
+            if hasattr(mesh, "auto_smooth_angle"):
+                mesh.auto_smooth_angle = math.radians(45.0)
+            for poly in mesh.polygons:
+                poly.use_smooth = False
             obj = bpy.data.objects.new(f"{group}_obj", mesh)
             obj["generated_by"] = GENERATOR_TAG
             if group in materials:

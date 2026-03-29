@@ -13,6 +13,9 @@ from .utils import GENERATOR_TAG
 
 class BuildingAssembler:
     WINDOW_OVERLAP = 0.015
+    MODULE_OVERLAP = 0.01
+    MIN_WINDOW_WIDTH = 0.8
+    MIN_WINDOW_HEIGHT = 0.7
 
     def __init__(self, batch: MeshBatcher, generated_collection, asset_helper_collection, asset_instance_collection):
         self.batch = batch
@@ -221,25 +224,34 @@ class BuildingAssembler:
             if self._add_roof_box_if_valid(shape, root, rect, roof_z + 0.01, util_h, "wall", blocked_rects):
                 blocked_rects.append(rect)
 
-    def _window_layout(self, settings, tile_width: float, sill_offset: float = 0.0, head_offset: float = 0.0):
+    def _window_layout(self, settings, tile_width: float, width_factor: float = 1.0, sill_offset: float = 0.0, head_offset: float = 0.0):
         floor_h = float(settings.floor_height)
         clearance = float(getattr(settings, "minimum_window_clearance", 0.5))
         overlap = float(getattr(settings, "window_overlap", self.WINDOW_OVERLAP))
         overlap = max(0.01, min(0.02, overlap))
         max_sill = max(0.0, floor_h - 0.8)
-        max_head = max(0.0, floor_h - 0.1)
+        max_head = max(0.0, floor_h - 0.05)
         sill = max(0.0, min(max_sill, float(settings.window_sill_h) + sill_offset))
         head = max(0.0, min(max_head, float(settings.window_head_h) + head_offset))
-        if head <= sill + clearance:
+        if head <= sill + clearance or head <= sill:
+            return None
+        window_h = head - sill
+        if window_h < self.MIN_WINDOW_HEIGHT:
             return None
 
-        min_trim = max(0.08, tile_width * 0.09)
-        trim_nominal = max(min_trim, tile_width * 0.12)
-        max_trim = max(min_trim, (tile_width - 0.12) * 0.5)
-        trim_nominal = min(trim_nominal, max_trim)
-        glass_nominal = tile_width - trim_nominal * 2.0
-        if glass_nominal <= 0.1:
+        max_window_width = tile_width * 0.9
+        requested_window_width = tile_width * max(0.45, min(1.0, width_factor))
+        window_width = min(max_window_width, requested_window_width)
+        window_width = max(self.MIN_WINDOW_WIDTH, window_width)
+        if window_width > max_window_width + 1e-6 or window_width >= tile_width:
             return None
+        trim_nominal = (tile_width - window_width) * 0.5
+        if trim_nominal <= 0.01:
+            return None
+        # Single source of truth: left trim + glass + right trim == tile
+        left_trim = trim_nominal
+        right_trim = trim_nominal
+        glass_nominal = tile_width - left_trim - right_trim
 
         return {
             "tile": tile_width,
@@ -247,9 +259,10 @@ class BuildingAssembler:
             "head": head,
             "clearance": clearance,
             "overlap": overlap,
-            "trim_nominal": trim_nominal,
+            "left_trim": left_trim,
+            "right_trim": right_trim,
             "glass_nominal": glass_nominal,
-            "window_h": head - sill,
+            "window_h": window_h,
             "lower_h": sill,
             "upper_h": floor_h - head,
         }
@@ -264,14 +277,15 @@ class BuildingAssembler:
         win_h = max(0.01, win_b - win_a)
         upper_h = max(0.01, upper_b - upper_a)
 
-        trim_nominal = layout["trim_nominal"]
+        trim_left = layout["left_trim"]
+        trim_right = layout["right_trim"]
         glass_nominal = layout["glass_nominal"]
 
         left_a = -tile * 0.5
-        left_b = -tile * 0.5 + trim_nominal + overlap
-        glass_a = -tile * 0.5 + trim_nominal - overlap
-        glass_b = tile * 0.5 - trim_nominal + overlap
-        right_a = tile * 0.5 - trim_nominal - overlap
+        left_b = -tile * 0.5 + trim_left + overlap
+        glass_a = -tile * 0.5 + trim_left - overlap
+        glass_b = glass_a + glass_nominal + overlap * 2.0
+        right_a = tile * 0.5 - trim_right - overlap
         right_b = tile * 0.5
 
         left_w = max(0.01, left_b - left_a)
@@ -399,8 +413,14 @@ class BuildingAssembler:
     def _build_window_variant(self, settings, root, z_floor, face, wx, wy, width_factor: float, sill_offset: float):
         if not getattr(settings, "window_is_valid", True):
             return False
-        tile = settings.tile_size * max(0.45, min(1.0, width_factor))
-        layout = self._window_layout(settings, tile_width=tile, sill_offset=sill_offset, head_offset=sill_offset * 0.5)
+        tile = settings.tile_size
+        layout = self._window_layout(
+            settings,
+            tile_width=tile,
+            width_factor=width_factor,
+            sill_offset=sill_offset,
+            head_offset=sill_offset * 0.5,
+        )
         if layout is None:
             return False
         axis = "x" if face in {"front", "back"} else "y"
@@ -409,10 +429,11 @@ class BuildingAssembler:
         return True
 
     def _build_full_wall(self, face, settings, tile, wx, wy, z_floor_world):
+        tile_with_overlap = tile + self.MODULE_OVERLAP * 2.0
         if face in {"front", "back"}:
-            self.add_box("wall", tile, settings.wall_thickness, settings.floor_height, (wx, wy, z_floor_world + settings.floor_height * 0.5))
+            self.add_box("wall", tile_with_overlap, settings.wall_thickness, settings.floor_height, (wx, wy, z_floor_world + settings.floor_height * 0.5))
         else:
-            self.add_box("wall", settings.wall_thickness, tile, settings.floor_height, (wx, wy, z_floor_world + settings.floor_height * 0.5))
+            self.add_box("wall", settings.wall_thickness, tile_with_overlap, settings.floor_height, (wx, wy, z_floor_world + settings.floor_height * 0.5))
 
     def _build_service_bay_overlay(self, face, settings, style, tile, wx, wy, z_floor_world):
         panel_h = settings.floor_height * (0.3 + getattr(style, "accent_strength", 0.5) * 0.16)
