@@ -12,8 +12,8 @@ from .utils import GENERATOR_TAG
 
 
 class BuildingAssembler:
-    WINDOW_OVERLAP = 0.0
-    MODULE_OVERLAP = 0.0
+    WINDOW_OVERLAP = 0.015
+    MODULE_OVERLAP = 0.004
     SURFACE_EPSILON = 0.012
     MIN_WINDOW_WIDTH = 0.8
     MIN_WINDOW_HEIGHT = 0.7
@@ -242,7 +242,7 @@ class BuildingAssembler:
         floor_h = float(settings.floor_height)
         clearance = float(getattr(settings, "minimum_window_clearance", 0.5))
         overlap = float(getattr(settings, "window_overlap", self.WINDOW_OVERLAP))
-        overlap = max(0.0, min(0.002, overlap))
+        overlap = max(0.0, overlap)
         max_sill = max(0.0, floor_h - 0.8)
         max_head = max(0.0, floor_h - 0.05)
         sill = max(0.0, min(max_sill, float(settings.window_sill_h) + sill_offset))
@@ -389,32 +389,20 @@ class BuildingAssembler:
             self._build_entrance_module(settings, style, root, z_floor, face, wx, wy, tile)
             return
 
-        if module_id in {"SolidWallModule", "ServiceWallModule", "CornerModule", "SolidWallBayModule", "ServiceBayModule"}:
+        if module_id in {"SolidWallModule", "ServiceWallModule", "CornerModule", "SolidWallBayModule"}:
             self._build_full_wall(face, settings, tile, wx, wy, root.location.z + z_floor)
-            if module_id == "ServiceBayModule":
-                self._build_service_bay_overlay(face, settings, style, tile, wx, wy, root.location.z + z_floor)
+            return
+
+        if module_id == "ServiceBayModule":
+            self._build_service_bay_module(face, settings, style, tile, wx, wy, root.location.z + z_floor)
             return
 
         if module_id == "RecessedStripModule":
-            self._build_full_wall(face, settings, tile, wx, wy, root.location.z + z_floor)
             self._build_recessed_strip(face, settings, style, tile, wx, wy, root.location.z + z_floor)
             return
 
         if module_id == "AccentPanelModule":
-            inset = max(0.05, settings.wall_thickness * 0.2)
-            panel_h = settings.floor_height * 0.72
-            panel_z = root.location.z + z_floor + panel_h * 0.5 + settings.floor_height * 0.14
-            if face in {"front", "back"}:
-                self.add_box("trim", tile * 0.82, settings.wall_thickness * 0.42, panel_h, (wx, wy - inset if face == "front" else wy + inset, panel_z))
-                self.add_box("wall", tile, settings.wall_thickness, settings.floor_height, (wx, wy, root.location.z + z_floor + settings.floor_height * 0.5))
-            else:
-                self.add_box("trim", settings.wall_thickness * 0.42, tile * 0.82, panel_h, (wx - inset if face == "left" else wx + inset, wy, panel_z))
-                self.add_box("wall", settings.wall_thickness, tile, settings.floor_height, (wx, wy, root.location.z + z_floor + settings.floor_height * 0.5))
-            return
-
-        if module_id == "NarrowWindowBayModule":
-            if not self._build_window_variant(settings, root, z_floor, face, wx, wy, width_factor=0.58, sill_offset=0.08):
-                self._build_full_wall(face, settings, tile, wx, wy, root.location.z + z_floor)
+            self._build_accent_panel_module(face, settings, style, tile, wx, wy, root.location.z + z_floor)
             return
 
         if module_id == "WideWindowBayModule":
@@ -451,34 +439,59 @@ class BuildingAssembler:
         return True
 
     def _build_full_wall(self, face, settings, tile, wx, wy, z_floor_world):
-        tile_with_overlap = tile + self.MODULE_OVERLAP * 2.0
+        module_overlap = max(0.0, float(getattr(settings, "module_overlap", self.MODULE_OVERLAP)))
+        tile_with_overlap = tile + module_overlap * 2.0
         if face in {"front", "back"}:
             self.add_box("wall", tile_with_overlap, settings.wall_thickness, settings.floor_height, (wx, wy, z_floor_world + settings.floor_height * 0.5))
         else:
             self.add_box("wall", settings.wall_thickness, tile_with_overlap, settings.floor_height, (wx, wy, z_floor_world + settings.floor_height * 0.5))
 
-    def _build_service_bay_overlay(self, face, settings, style, tile, wx, wy, z_floor_world):
+    def _build_service_bay_module(self, face, settings, style, tile, wx, wy, z_floor_world):
+        self._build_full_wall(face, settings, tile, wx, wy, z_floor_world)
         panel_h = settings.floor_height * (0.3 + getattr(style, "accent_strength", 0.5) * 0.16)
         panel_z = z_floor_world + settings.window_sill_h + panel_h * 0.55
-        ox, oy = self._offset_on_face(face, wx, wy, settings.wall_thickness * 0.28 + self.SURFACE_EPSILON)
-        depth = max(0.02, settings.wall_thickness * 0.32)
+        depth = max(settings.wall_thickness * 0.36, self.SURFACE_EPSILON * 2.2)
+        offset = settings.wall_thickness * 0.5 + depth * 0.5 + self.SURFACE_EPSILON
+        ox, oy = self._offset_on_face(face, wx, wy, offset)
         if face in {"front", "back"}:
             self.add_box("trim", tile * 0.82, depth, panel_h, (ox, oy, panel_z))
         else:
             self.add_box("trim", depth, tile * 0.82, panel_h, (ox, oy, panel_z))
 
     def _build_recessed_strip(self, face, settings, style, tile, wx, wy, z_floor_world):
+        strip_depth = max(settings.wall_thickness * 0.28, self.SURFACE_EPSILON * 2.0)
+        strip_width = tile * 0.26
+        side_w = max(0.01, (tile - strip_width) * 0.5)
+        side_offset = (strip_width + side_w) * 0.5
+        if face in {"front", "back"}:
+            self._build_full_wall(face, settings, side_w, wx - side_offset, wy, z_floor_world)
+            self._build_full_wall(face, settings, side_w, wx + side_offset, wy, z_floor_world)
+        else:
+            self._build_full_wall(face, settings, side_w, wx, wy - side_offset, z_floor_world)
+            self._build_full_wall(face, settings, side_w, wx, wy + side_offset, z_floor_world)
         strip_h = settings.floor_height * 0.8
         strip_z = z_floor_world + settings.floor_height * 0.52
-        recess = settings.wall_thickness * (0.18 + getattr(style, "vertical_fins", 0.5) * 0.2) + self.SURFACE_EPSILON
+        recess = settings.wall_thickness * 0.5 - strip_depth * 0.5 - self.SURFACE_EPSILON
         if face == "front":
-            self.add_box("trim", tile * 0.26, settings.wall_thickness * 0.2, strip_h, (wx, wy + recess, strip_z))
+            self.add_box("trim", strip_width, strip_depth, strip_h, (wx, wy + recess, strip_z))
         elif face == "back":
-            self.add_box("trim", tile * 0.26, settings.wall_thickness * 0.2, strip_h, (wx, wy - recess, strip_z))
+            self.add_box("trim", strip_width, strip_depth, strip_h, (wx, wy - recess, strip_z))
         elif face == "left":
-            self.add_box("trim", settings.wall_thickness * 0.2, tile * 0.26, strip_h, (wx + recess, wy, strip_z))
+            self.add_box("trim", strip_depth, strip_width, strip_h, (wx + recess, wy, strip_z))
         else:
-            self.add_box("trim", settings.wall_thickness * 0.2, tile * 0.26, strip_h, (wx - recess, wy, strip_z))
+            self.add_box("trim", strip_depth, strip_width, strip_h, (wx - recess, wy, strip_z))
+
+    def _build_accent_panel_module(self, face, settings, style, tile, wx, wy, z_floor_world):
+        self._build_full_wall(face, settings, tile, wx, wy, z_floor_world)
+        panel_h = settings.floor_height * 0.72
+        panel_z = z_floor_world + panel_h * 0.5 + settings.floor_height * 0.14
+        panel_depth = max(settings.wall_thickness * 0.46, self.SURFACE_EPSILON * 2.4)
+        offset = settings.wall_thickness * 0.5 + panel_depth * 0.5 + self.SURFACE_EPSILON
+        ox, oy = self._offset_on_face(face, wx, wy, offset)
+        if face in {"front", "back"}:
+            self.add_box("trim", tile * 0.82, panel_depth, panel_h, (ox, oy, panel_z))
+        else:
+            self.add_box("trim", panel_depth, tile * 0.82, panel_h, (ox, oy, panel_z))
 
     def _build_entrance_module(self, settings, style, root, z_floor, face, wx, wy, tile):
         dw = settings.door_width

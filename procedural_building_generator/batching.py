@@ -10,6 +10,7 @@ class MeshBatcher:
         self.data = {}
         self._bbox_records = []
         self._reported_overlap = False
+        self._skipped_overlaps = 0
 
     def add_box(self, group, sx, sy, sz, center):
         cx, cy, cz = center
@@ -21,7 +22,9 @@ class MeshBatcher:
             cy + sy * 0.5,
             cz + sz * 0.5,
         )
-        self._debug_overlap_check(group, bbox)
+        if not self._debug_overlap_check(group, bbox):
+            self._skipped_overlaps += 1
+            return
         verts, faces = world_box(sx, sy, sz, center)
         if group not in self.data:
             self.data[group] = {"verts": [], "faces": []}
@@ -40,18 +43,19 @@ class MeshBatcher:
             iz = min(z1, oz1) - max(z0, oz0)
             if ix > eps and iy > eps and iz > eps:
                 if not self._reported_overlap:
-                    print("Overlapping geometry detected in facade module")
+                    print("Overlapping geometry detected in facade module; skipping intersecting box")
                     self._reported_overlap = True
-                return
+                return False
             coplanar_x = abs(x1 - ox0) <= eps or abs(ox1 - x0) <= eps
             coplanar_y = abs(y1 - oy0) <= eps or abs(oy1 - y0) <= eps
             coplanar_z = abs(z1 - oz0) <= eps or abs(oz1 - z0) <= eps
             touching_axes = int(coplanar_x) + int(coplanar_y) + int(coplanar_z)
             if touching_axes == 1 and (ix > eps or iy > eps or iz > eps):
                 if group == other_group and not self._reported_overlap:
-                    print("Overlapping geometry detected in facade module")
+                    print("Nearly coplanar overlap detected in facade module; skipping box")
                     self._reported_overlap = True
-                return
+                return False
+        return True
 
     @staticmethod
     def _remove_duplicate_faces(bm):
@@ -66,6 +70,12 @@ class MeshBatcher:
         if delete_faces:
             bmesh.ops.delete(bm, geom=delete_faces, context='FACES')
 
+    @staticmethod
+    def _remove_internal_faces(bm):
+        internal = [face for face in bm.faces if face.calc_area() <= 1e-8]
+        if internal:
+            bmesh.ops.delete(bm, geom=internal, context='FACES')
+
     def build_objects(self, collection, materials, smooth=False):
         for group, payload in self.data.items():
             if not payload["verts"] or not payload["faces"]:
@@ -76,7 +86,16 @@ class MeshBatcher:
             bm.from_mesh(mesh)
             bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-5)
             self._remove_duplicate_faces(bm)
+            self._remove_internal_faces(bm)
             bmesh.ops.dissolve_degenerate(bm, edges=bm.edges, dist=1e-6)
+            if bm.faces:
+                bmesh.ops.dissolve_limit(
+                    bm,
+                    angle_limit=0.0005,
+                    use_dissolve_boundaries=False,
+                    verts=bm.verts,
+                    edges=bm.edges,
+                )
             bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
             bm.to_mesh(mesh)
             bm.free()
@@ -89,6 +108,8 @@ class MeshBatcher:
                 poly.use_smooth = False
             obj = bpy.data.objects.new(f"{group}_obj", mesh)
             obj["generated_by"] = GENERATOR_TAG
+            if self._skipped_overlaps:
+                obj["skipped_overlap_boxes"] = int(self._skipped_overlaps)
             if group in materials:
                 obj.data.materials.append(materials[group])
             collection.objects.link(obj)

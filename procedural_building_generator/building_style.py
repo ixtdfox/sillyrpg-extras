@@ -184,7 +184,7 @@ class BuildingStyle:
         if require_center_entrance and slots_total >= 3:
             modules_by_slot[center_idx] = definitions["EntranceDoorModule"]
             if face == "front":
-                flank = "WideWindowBayModule" if slots_total >= 5 else "NarrowWindowBayModule"
+                flank = "WideWindowBayModule" if slots_total >= 5 else "StandardWindowModule"
                 if center_idx - 1 > 0:
                     modules_by_slot[center_idx - 1] = definitions[flank]
                 if center_idx + 1 < slots_total - 1:
@@ -333,21 +333,21 @@ class BuildingStyle:
             "SCIENTIST_HOUSING": cls._make_profiles(
                 ground=dict(
                     allowed=("SolidWallModule", "SolidWallBayModule", "StandardWindowModule", "NarrowWindowBayModule", "WideWindowBayModule", "ServiceWallModule", "ServiceBayModule", "StairWindowModule", "AccentPanelModule", "RecessedStripModule"),
-                    probs={"StandardWindowModule": 0.3, "NarrowWindowBayModule": 0.18, "WideWindowBayModule": 0.07, "ServiceWallModule": 0.13, "ServiceBayModule": 0.08, "StairWindowModule": 0.1, "AccentPanelModule": 0.1, "RecessedStripModule": 0.04},
+                    probs={"StandardWindowModule": 0.3, "NarrowWindowBayModule": 0.0, "WideWindowBayModule": 0.07, "ServiceWallModule": 0.13, "ServiceBayModule": 0.08, "StairWindowModule": 0.1, "AccentPanelModule": 0.1, "RecessedStripModule": 0.04},
                     glazing=0.72,
                     balcony=0.05,
                     accent=0.65,
                 ),
                 typical=dict(
                     allowed=("SolidWallModule", "SolidWallBayModule", "StandardWindowModule", "NarrowWindowBayModule", "WideWindowBayModule", "StairWindowModule", "BalconyModule", "AccentPanelModule", "RecessedStripModule"),
-                    probs={"StandardWindowModule": 0.32, "NarrowWindowBayModule": 0.18, "WideWindowBayModule": 0.12, "SolidWallModule": 0.1, "SolidWallBayModule": 0.07, "StairWindowModule": 0.08, "BalconyModule": 0.07, "AccentPanelModule": 0.04, "RecessedStripModule": 0.02},
+                    probs={"StandardWindowModule": 0.32, "NarrowWindowBayModule": 0.0, "WideWindowBayModule": 0.12, "SolidWallModule": 0.1, "SolidWallBayModule": 0.07, "StairWindowModule": 0.08, "BalconyModule": 0.07, "AccentPanelModule": 0.04, "RecessedStripModule": 0.02},
                     glazing=0.86,
                     balcony=0.18,
                     accent=0.52,
                 ),
                 top=dict(
                     allowed=("SolidWallModule", "SolidWallBayModule", "StandardWindowModule", "NarrowWindowBayModule", "WideWindowBayModule", "BalconyModule", "AccentPanelModule", "RecessedStripModule"),
-                    probs={"StandardWindowModule": 0.28, "NarrowWindowBayModule": 0.15, "WideWindowBayModule": 0.13, "BalconyModule": 0.18, "AccentPanelModule": 0.12, "SolidWallModule": 0.08, "SolidWallBayModule": 0.06},
+                    probs={"StandardWindowModule": 0.28, "NarrowWindowBayModule": 0.0, "WideWindowBayModule": 0.13, "BalconyModule": 0.18, "AccentPanelModule": 0.12, "SolidWallModule": 0.08, "SolidWallBayModule": 0.06},
                     glazing=0.8,
                     balcony=0.42,
                     accent=0.82,
@@ -356,21 +356,21 @@ class BuildingStyle:
             "TECHNICIAN_HOUSING": cls._make_profiles(
                 ground=dict(
                     allowed=("SolidWallModule", "SolidWallBayModule", "StandardWindowModule", "NarrowWindowBayModule", "WideWindowBayModule", "ServiceWallModule", "ServiceBayModule", "EntranceDoorModule", "StairWindowModule", "RecessedStripModule"),
-                    probs={"StandardWindowModule": 0.23, "NarrowWindowBayModule": 0.14, "WideWindowBayModule": 0.06, "ServiceWallModule": 0.22, "ServiceBayModule": 0.12, "StairWindowModule": 0.13, "SolidWallModule": 0.1},
+                    probs={"StandardWindowModule": 0.23, "NarrowWindowBayModule": 0.0, "WideWindowBayModule": 0.06, "ServiceWallModule": 0.22, "ServiceBayModule": 0.12, "StairWindowModule": 0.13, "SolidWallModule": 0.1},
                     glazing=0.58,
                     balcony=0.04,
                     accent=0.4,
                 ),
                 typical=dict(
                     allowed=("SolidWallModule", "SolidWallBayModule", "StandardWindowModule", "NarrowWindowBayModule", "WideWindowBayModule", "StairWindowModule", "BalconyModule", "ServiceWallModule", "ServiceBayModule", "RecessedStripModule"),
-                    probs={"StandardWindowModule": 0.28, "NarrowWindowBayModule": 0.16, "WideWindowBayModule": 0.1, "SolidWallModule": 0.11, "SolidWallBayModule": 0.07, "ServiceWallModule": 0.1, "ServiceBayModule": 0.06, "StairWindowModule": 0.07, "BalconyModule": 0.05},
+                    probs={"StandardWindowModule": 0.28, "NarrowWindowBayModule": 0.0, "WideWindowBayModule": 0.1, "SolidWallModule": 0.11, "SolidWallBayModule": 0.07, "ServiceWallModule": 0.1, "ServiceBayModule": 0.06, "StairWindowModule": 0.07, "BalconyModule": 0.05},
                     glazing=0.74,
                     balcony=0.12,
                     accent=0.35,
                 ),
                 top=dict(
                     allowed=("SolidWallModule", "SolidWallBayModule", "StandardWindowModule", "NarrowWindowBayModule", "WideWindowBayModule", "BalconyModule", "ServiceWallModule", "ServiceBayModule", "AccentPanelModule", "RecessedStripModule"),
-                    probs={"StandardWindowModule": 0.22, "NarrowWindowBayModule": 0.14, "WideWindowBayModule": 0.1, "BalconyModule": 0.16, "ServiceWallModule": 0.16, "ServiceBayModule": 0.08, "AccentPanelModule": 0.08, "SolidWallModule": 0.06},
+                    probs={"StandardWindowModule": 0.22, "NarrowWindowBayModule": 0.0, "WideWindowBayModule": 0.1, "BalconyModule": 0.16, "ServiceWallModule": 0.16, "ServiceBayModule": 0.08, "AccentPanelModule": 0.08, "SolidWallModule": 0.06},
                     glazing=0.68,
                     balcony=0.28,
                     accent=0.56,
@@ -379,21 +379,21 @@ class BuildingStyle:
             "SECURITY_HOUSING": cls._make_profiles(
                 ground=dict(
                     allowed=("SolidWallModule", "SolidWallBayModule", "ServiceWallModule", "ServiceBayModule", "StandardWindowModule", "NarrowWindowBayModule", "AccentPanelModule", "RecessedStripModule"),
-                    probs={"ServiceWallModule": 0.3, "ServiceBayModule": 0.14, "SolidWallModule": 0.2, "SolidWallBayModule": 0.12, "StandardWindowModule": 0.14, "NarrowWindowBayModule": 0.06, "AccentPanelModule": 0.04},
+                    probs={"ServiceWallModule": 0.3, "ServiceBayModule": 0.14, "SolidWallModule": 0.2, "SolidWallBayModule": 0.12, "StandardWindowModule": 0.14, "NarrowWindowBayModule": 0.0, "AccentPanelModule": 0.04},
                     glazing=0.44,
                     balcony=0.01,
                     accent=0.38,
                 ),
                 typical=dict(
                     allowed=("SolidWallModule", "SolidWallBayModule", "ServiceWallModule", "ServiceBayModule", "StandardWindowModule", "NarrowWindowBayModule", "StairWindowModule", "RecessedStripModule"),
-                    probs={"StandardWindowModule": 0.2, "NarrowWindowBayModule": 0.1, "ServiceWallModule": 0.24, "ServiceBayModule": 0.12, "SolidWallModule": 0.14, "SolidWallBayModule": 0.12, "StairWindowModule": 0.06, "RecessedStripModule": 0.02},
+                    probs={"StandardWindowModule": 0.2, "NarrowWindowBayModule": 0.0, "ServiceWallModule": 0.24, "ServiceBayModule": 0.12, "SolidWallModule": 0.14, "SolidWallBayModule": 0.12, "StairWindowModule": 0.06, "RecessedStripModule": 0.02},
                     glazing=0.57,
                     balcony=0.02,
                     accent=0.22,
                 ),
                 top=dict(
                     allowed=("SolidWallModule", "SolidWallBayModule", "ServiceWallModule", "ServiceBayModule", "StandardWindowModule", "NarrowWindowBayModule", "AccentPanelModule", "RecessedStripModule"),
-                    probs={"StandardWindowModule": 0.17, "NarrowWindowBayModule": 0.1, "ServiceWallModule": 0.24, "ServiceBayModule": 0.13, "SolidWallModule": 0.14, "SolidWallBayModule": 0.1, "AccentPanelModule": 0.08, "RecessedStripModule": 0.04},
+                    probs={"StandardWindowModule": 0.17, "NarrowWindowBayModule": 0.0, "ServiceWallModule": 0.24, "ServiceBayModule": 0.13, "SolidWallModule": 0.14, "SolidWallBayModule": 0.1, "AccentPanelModule": 0.08, "RecessedStripModule": 0.04},
                     glazing=0.5,
                     balcony=0.04,
                     accent=0.45,
@@ -402,21 +402,21 @@ class BuildingStyle:
             "SERVICE_RESIDENCE": cls._make_profiles(
                 ground=dict(
                     allowed=("SolidWallModule", "SolidWallBayModule", "ServiceWallModule", "ServiceBayModule", "StandardWindowModule", "NarrowWindowBayModule", "AccentPanelModule", "RecessedStripModule"),
-                    probs={"ServiceWallModule": 0.28, "ServiceBayModule": 0.17, "SolidWallModule": 0.2, "SolidWallBayModule": 0.14, "StandardWindowModule": 0.14, "NarrowWindowBayModule": 0.04, "AccentPanelModule": 0.03},
+                    probs={"ServiceWallModule": 0.28, "ServiceBayModule": 0.17, "SolidWallModule": 0.2, "SolidWallBayModule": 0.14, "StandardWindowModule": 0.14, "NarrowWindowBayModule": 0.0, "AccentPanelModule": 0.03},
                     glazing=0.46,
                     balcony=0.0,
                     accent=0.32,
                 ),
                 typical=dict(
                     allowed=("SolidWallModule", "SolidWallBayModule", "ServiceWallModule", "ServiceBayModule", "StandardWindowModule", "NarrowWindowBayModule", "StairWindowModule", "AccentPanelModule", "RecessedStripModule"),
-                    probs={"StandardWindowModule": 0.17, "NarrowWindowBayModule": 0.1, "ServiceWallModule": 0.24, "ServiceBayModule": 0.18, "SolidWallModule": 0.12, "SolidWallBayModule": 0.1, "StairWindowModule": 0.06, "AccentPanelModule": 0.02, "RecessedStripModule": 0.01},
+                    probs={"StandardWindowModule": 0.17, "NarrowWindowBayModule": 0.0, "ServiceWallModule": 0.24, "ServiceBayModule": 0.18, "SolidWallModule": 0.12, "SolidWallBayModule": 0.1, "StairWindowModule": 0.06, "AccentPanelModule": 0.02, "RecessedStripModule": 0.01},
                     glazing=0.55,
                     balcony=0.0,
                     accent=0.3,
                 ),
                 top=dict(
                     allowed=("SolidWallModule", "SolidWallBayModule", "ServiceWallModule", "ServiceBayModule", "StandardWindowModule", "NarrowWindowBayModule", "AccentPanelModule", "BalconyModule", "RecessedStripModule"),
-                    probs={"StandardWindowModule": 0.16, "NarrowWindowBayModule": 0.1, "ServiceWallModule": 0.21, "ServiceBayModule": 0.16, "SolidWallModule": 0.13, "SolidWallBayModule": 0.1, "AccentPanelModule": 0.08, "BalconyModule": 0.05, "RecessedStripModule": 0.01},
+                    probs={"StandardWindowModule": 0.16, "NarrowWindowBayModule": 0.0, "ServiceWallModule": 0.21, "ServiceBayModule": 0.16, "SolidWallModule": 0.13, "SolidWallBayModule": 0.1, "AccentPanelModule": 0.08, "BalconyModule": 0.05, "RecessedStripModule": 0.01},
                     glazing=0.49,
                     balcony=0.14,
                     accent=0.54,
@@ -567,7 +567,7 @@ class BuildingStyle:
                 id="NarrowWindowBayModule",
                 category="window_narrow",
                 nominal_width=tile_size,
-                probability=0.22,
+                probability=0.0,
                 can_scale=False,
                 supports_ground_floor=True,
                 supports_typical_floor=True,
