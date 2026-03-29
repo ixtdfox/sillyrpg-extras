@@ -158,8 +158,18 @@ def build_volume_blocks(width: float, depth: float, floors: int, tile: float, se
     main = VolumeBlock("main", main_x0, main_y0, main_x1, main_y1, 0, floors)
     if floors >= 2:
         # Robustness over variety for multi-floor houses:
-        # keep a single coherent full-height mass to avoid missing 2F walls.
-        return (main, VolumeBlock("upper", main.x0, main.y0, main.x1, main.y1, 1, floors - 1))
+        # keep a coherent full-height mass, but preserve one attached wing.
+        wing_w = _snap_tile(max(tile * 2, width * (0.2 + rng.random() * 0.1)), tile)
+        wing_d = _snap_tile(max(tile * 3, depth * (0.42 + rng.random() * 0.18)), tile)
+        left_side = rng.random() < 0.5
+        wing_y0 = max(0.0, min(depth - wing_d, main.y0 + (main.depth - wing_d) * 0.5))
+        if left_side:
+            rect = (max(0.0, main.x0 - wing_w + tile), wing_y0, main.x0 + tile, wing_y0 + wing_d)
+        else:
+            rect = (main.x1 - tile, wing_y0, min(width, main.x1 + wing_w - tile), wing_y0 + wing_d)
+        wx0, wy0, wx1, wy1 = _clamp_rect(rect, width, depth, tile)
+        wing = VolumeBlock("utility", wx0, wy0, wx1, wy1, 0, floors)
+        return (main, wing, VolumeBlock("upper", main.x0, main.y0, main.x1, main.y1, 1, floors - 1))
     blocks = [main]
 
     entrance_w = _snap_tile(max(tile * 2, main.width * (0.35 + rng.random() * 0.2)), tile)
