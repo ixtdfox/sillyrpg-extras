@@ -940,10 +940,11 @@ class BuildingAssembler:
             z = z_floor + exact_rise * (i + 0.5)
             y = y_start + run * i
             self.add_box("floor", stair_w, run, exact_rise, self.local_to_world(shape, root, x_mid, y, z))
-        top_cap_y = min(zone.y1 - 0.25, y_start + run * n_steps)
+        top_cap_d = max(0.28, run * 1.25)
+        top_cap_y = min(zone.y1 - top_cap_d * 0.5 - 0.02, y_start + run * n_steps)
         top_cap_h = max(0.12, exact_rise)
-        top_cap_z = z_floor + clear_h - top_cap_h * 0.5
-        self.add_box("floor", stair_w, max(0.28, run * 1.25), top_cap_h, self.local_to_world(shape, root, x_mid, top_cap_y, top_cap_z))
+        top_cap_z = z_floor + clear_h - top_cap_h * 0.5 - 0.01
+        self.add_box("floor", stair_w, top_cap_d, top_cap_h, self.local_to_world(shape, root, x_mid, top_cap_y, top_cap_z))
         stair_top_z = top_cap_z + top_cap_h * 0.5
         return stair_top_z
 
