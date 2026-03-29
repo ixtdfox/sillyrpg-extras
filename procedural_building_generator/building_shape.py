@@ -51,6 +51,9 @@ class BuildingShape:
     volume_blocks: tuple[VolumeBlock, ...]
     floor_footprints: tuple[tuple[float, float, float, float], ...]
     floor_cells: tuple[tuple[tuple[int, int], ...], ...]
+    composition_tier: str
+    stair_status: str
+    fallback_reason: str
 
     @classmethod
     def from_settings(cls, settings, fast_mode: bool) -> "BuildingShape":
@@ -59,18 +62,6 @@ class BuildingShape:
         depth = float(settings.depth_m)
         floors = max(1, min(3, int(settings.floors)))  # low-rise only
         room_count = max(1, int(settings.room_count))
-
-        stair_w = max(tile * 2, math.ceil(settings.stairs_width / tile) * tile)
-        stair_d = tile * 4
-        zone = RectCell(tile, tile, tile + stair_w, tile + stair_d)
-
-        margin = settings.stair_opening_margin
-        opening = (
-            max(0.0, zone.x0 - margin),
-            max(0.0, zone.y0 - margin),
-            min(width, zone.x1 + margin),
-            min(depth, zone.y1 + margin),
-        )
 
         rooms = split_rectangles(width, depth, room_count, tile, settings.seed)
         doors = choose_connected_doors(rooms, settings.seed)
@@ -84,9 +75,43 @@ class BuildingShape:
             for i in range(floors)
         ]
 
-        volume_blocks = build_volume_blocks(width, depth, floors, tile, int(settings.seed), str(getattr(settings, "style_preset", "MINIMAL_MODERN_VILLA")))
+        volume_blocks, tier, fallback_reason = resolve_volume_composition(
+            width,
+            depth,
+            floors,
+            tile,
+            int(settings.seed),
+            str(getattr(settings, "style_preset", "MINIMAL_MODERN_VILLA")),
+        )
         floor_footprints = tuple(build_floor_footprints(width, depth, floors, volume_blocks))
         floor_cells = tuple(build_floor_cells(width, depth, tile, floors, volume_blocks))
+        zone, opening, stair_status, stair_fallback_reason = resolve_stair_layout(
+            width,
+            depth,
+            floors,
+            tile,
+            float(settings.stairs_width),
+            float(settings.stair_opening_margin),
+            floor_cells,
+        )
+        if stair_status == "fallback-main-block":
+            volume_blocks = _tier_c_blocks(width, depth, floors)
+            floor_footprints = tuple(build_floor_footprints(width, depth, floors, volume_blocks))
+            floor_cells = tuple(build_floor_cells(width, depth, tile, floors, volume_blocks))
+            zone, opening, stair_status, _ = resolve_stair_layout(
+                width,
+                depth,
+                floors,
+                tile,
+                float(settings.stairs_width),
+                float(settings.stair_opening_margin),
+                floor_cells,
+            )
+            if tier != "C":
+                tier = "C"
+        fallback = fallback_reason
+        if stair_fallback_reason:
+            fallback = f"{fallback} | {stair_fallback_reason}" if fallback else stair_fallback_reason
 
         return cls(
             width_m=width,
@@ -104,6 +129,9 @@ class BuildingShape:
             volume_blocks=volume_blocks,
             floor_footprints=floor_footprints,
             floor_cells=floor_cells,
+            composition_tier=tier,
+            stair_status=stair_status,
+            fallback_reason=fallback,
         )
 
 
@@ -178,6 +206,149 @@ def build_volume_blocks(width: float, depth: float, floors: int, tile: float, se
         dedup[key] = block
     resolved = list(dedup.values())[:4]
     return tuple(resolved)
+
+
+def _intersection_area(a: VolumeBlock, b: VolumeBlock) -> float:
+    dx = min(a.x1, b.x1) - max(a.x0, b.x0)
+    dy = min(a.y1, b.y1) - max(a.y0, b.y0)
+    return max(0.0, dx) * max(0.0, dy)
+
+
+def _blocks_for_floor(blocks: tuple[VolumeBlock, ...], floor_idx: int) -> list[VolumeBlock]:
+    return [b for b in blocks if b.floor_start <= floor_idx < (b.floor_start + b.floor_count)]
+
+
+def _validate_volume_blocks(blocks: tuple[VolumeBlock, ...], floors: int, tile: float) -> tuple[bool, str]:
+    main = next((b for b in blocks if b.role == "main"), None)
+    if main is None:
+        return False, "missing main block"
+    min_span = tile * 2
+    for block in blocks:
+        if block.width < min_span or block.depth < min_span:
+            return False, f"{block.role} block too thin"
+        if block.role != "main":
+            attached = False
+            for f in range(max(0, block.floor_start), min(floors, block.floor_start + block.floor_count)):
+                if _intersection_area(main, block) >= tile * tile * 0.5:
+                    attached = True
+                    break
+            if not attached:
+                return False, f"detached {block.role} block"
+
+    for floor_idx in range(floors):
+        active = _blocks_for_floor(blocks, floor_idx)
+        if not active:
+            return False, f"empty floor {floor_idx}"
+        connected: list[VolumeBlock] = [active[0]]
+        pending = active[1:]
+        while pending:
+            progressed = False
+            for block in pending[:]:
+                if any(_intersection_area(block, seen) >= tile * tile * 0.5 for seen in connected):
+                    connected.append(block)
+                    pending.remove(block)
+                    progressed = True
+            if not progressed:
+                return False, f"disconnected masses on floor {floor_idx}"
+    return True, ""
+
+
+def _tier_b_blocks(width: float, depth: float, floors: int, tile: float, seed: int) -> tuple[VolumeBlock, ...]:
+    rng = random.Random(seed * 911 + 41)
+    main = VolumeBlock("main", 0.0, 0.0, width, depth, 0, floors)
+    blocks = [main]
+    if width >= tile * 6 and depth >= tile * 6:
+        ext_w = _snap_tile(max(tile * 2, width * (0.22 + rng.random() * 0.12)), tile)
+        ext_d = _snap_tile(max(tile * 2, depth * (0.2 + rng.random() * 0.12)), tile)
+        if rng.random() < 0.5:
+            x0 = 0.0
+        else:
+            x0 = width - ext_w
+        y0 = 0.0
+        x0, y0, x1, y1 = _clamp_rect((x0, y0, x0 + ext_w, y0 + ext_d), width, depth, tile)
+        blocks.append(VolumeBlock("entrance", x0, y0, x1, y1, 0, 1))
+    if floors >= 2:
+        shrink = tile * (1 + (seed % 2))
+        ux0 = min(max(main.x0 + shrink, 0.0), width - tile * 2)
+        uy0 = min(max(main.y0 + shrink, 0.0), depth - tile * 2)
+        ux1 = max(ux0 + tile * 2, main.x1 - shrink)
+        uy1 = max(uy0 + tile * 2, main.y1 - shrink)
+        ux0, uy0, ux1, uy1 = _clamp_rect((ux0, uy0, ux1, uy1), width, depth, tile)
+        blocks.append(VolumeBlock("upper", ux0, uy0, ux1, uy1, 1, min(2, floors - 1)))
+    return tuple(blocks)
+
+
+def _tier_c_blocks(width: float, depth: float, floors: int) -> tuple[VolumeBlock, ...]:
+    return (VolumeBlock("main", 0.0, 0.0, width, depth, 0, floors),)
+
+
+def resolve_volume_composition(width: float, depth: float, floors: int, tile: float, seed: int, preset: str) -> tuple[tuple[VolumeBlock, ...], str, str]:
+    tier_a = build_volume_blocks(width, depth, floors, tile, seed, preset)
+    ok, reason = _validate_volume_blocks(tier_a, floors, tile)
+    if ok:
+        return tier_a, "A", ""
+
+    tier_b = _tier_b_blocks(width, depth, floors, tile, seed)
+    ok_b, reason_b = _validate_volume_blocks(tier_b, floors, tile)
+    if ok_b:
+        return tier_b, "B", f"multi-volume composition invalid: {reason} -> fallback to attached two-volume shape"
+
+    tier_c = _tier_c_blocks(width, depth, floors)
+    return tier_c, "C", f"tier-b composition invalid: {reason_b} -> fallback to single coherent main block"
+
+
+def _find_stair_zone(width: float, depth: float, tile: float, stairs_width: float, floors: int, floor_cells: tuple[tuple[tuple[int, int], ...], ...]) -> RectCell | None:
+    stair_w_tiles = max(2, int(math.ceil(stairs_width / tile)))
+    stair_d_tiles = 4
+    if floors <= 1:
+        return RectCell(tile, tile, tile + stair_w_tiles * tile, tile + stair_d_tiles * tile)
+    shared = set(floor_cells[0]) if floor_cells else set()
+    for f in range(1, floors):
+        shared &= set(floor_cells[f])
+    if not shared:
+        return None
+    nx = max(1, int(round(width / tile)))
+    ny = max(1, int(round(depth / tile)))
+    for iy in range(0, ny - stair_d_tiles + 1):
+        for ix in range(0, nx - stair_w_tiles + 1):
+            ok = True
+            for tx in range(ix, ix + stair_w_tiles):
+                for ty in range(iy, iy + stair_d_tiles):
+                    if (tx, ty) not in shared:
+                        ok = False
+                        break
+                if not ok:
+                    break
+            if ok:
+                return RectCell(ix * tile, iy * tile, (ix + stair_w_tiles) * tile, (iy + stair_d_tiles) * tile)
+    return None
+
+
+def resolve_stair_layout(width: float, depth: float, floors: int, tile: float, stairs_width: float, margin: float, floor_cells: tuple[tuple[tuple[int, int], ...], ...]) -> tuple[RectCell, tuple[float, float, float, float], str, str]:
+    zone = _find_stair_zone(width, depth, tile, stairs_width, floors, floor_cells)
+    if zone is None and floors > 1:
+        single = _tier_c_blocks(width, depth, floors)
+        fallback_cells = tuple(build_floor_cells(width, depth, tile, floors, single))
+        zone = _find_stair_zone(width, depth, tile, stairs_width, floors, fallback_cells)
+        if zone is None:
+            zone = RectCell(tile, tile, tile + max(tile * 2, stairs_width), tile + tile * 4)
+        opening = (
+            max(0.0, zone.x0 - margin),
+            max(0.0, zone.y0 - margin),
+            min(width, zone.x1 + margin),
+            min(depth, zone.y1 + margin),
+        )
+        return zone, opening, "fallback-main-block", "stair placement failed in composed shape -> fallback to simpler main block"
+
+    if zone is None:
+        zone = RectCell(tile, tile, tile + max(tile * 2, stairs_width), tile + tile * 4)
+    opening = (
+        max(0.0, zone.x0 - margin),
+        max(0.0, zone.y0 - margin),
+        min(width, zone.x1 + margin),
+        min(depth, zone.y1 + margin),
+    )
+    return zone, opening, "ok", ""
 
 
 def build_floor_footprints(width: float, depth: float, floors: int, blocks: tuple[VolumeBlock, ...]) -> list[tuple[float, float, float, float]]:
