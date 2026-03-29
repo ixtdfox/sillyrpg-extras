@@ -8,6 +8,7 @@ from mathutils import Vector
 from .asset_facade_module import resolve_asset_module
 from .batching import MeshBatcher
 from .building_shape import build_adjacency
+from .building_style import FloorLevel
 from .utils import GENERATOR_TAG
 
 
@@ -175,6 +176,42 @@ class BuildingAssembler:
     @staticmethod
     def _rects_overlap(a, b):
         return not (a[2] <= b[0] or a[0] >= b[2] or a[3] <= b[1] or a[1] >= b[3])
+
+    @staticmethod
+    def _rects_touch_or_overlap(a, b, eps=1e-6):
+        return not (a[2] < b[0] - eps or a[0] > b[2] + eps or a[3] < b[1] - eps or a[1] > b[3] + eps)
+
+    def _active_volume_rects(self, shape, floor_index):
+        rects = []
+        for block in getattr(shape, "volume_blocks", ()):
+            if block.floor_start <= floor_index < (block.floor_start + block.floor_count):
+                rects.append((block.x0, block.y0, block.x1, block.y1))
+        if rects:
+            return rects
+        if getattr(shape, "floor_footprints", None):
+            fx0, fy0, fx1, fy1 = shape.floor_footprints[floor_index]
+            return [(fx0, fy0, fx1, fy1)]
+        return [(0.0, 0.0, shape.width_m, shape.depth_m)]
+
+    def _connected_rects_or_fallback(self, rects):
+        if not rects:
+            return []
+        connected = [rects[0]]
+        pending = rects[1:]
+        while pending:
+            progressed = False
+            for rect in pending[:]:
+                if any(self._rects_touch_or_overlap(rect, seen) for seen in connected):
+                    connected.append(rect)
+                    pending.remove(rect)
+                    progressed = True
+            if not progressed:
+                bx0 = min(r[0] for r in rects)
+                by0 = min(r[1] for r in rects)
+                bx1 = max(r[2] for r in rects)
+                by1 = max(r[3] for r in rects)
+                return [(bx0, by0, bx1, by1)]
+        return rects
 
     def _safe_roof_rect(self, shape, settings, roof_rect=None):
         rx0, ry0, rx1, ry1 = roof_rect if roof_rect is not None else (0.0, 0.0, shape.width_m, shape.depth_m)
@@ -469,6 +506,7 @@ class BuildingAssembler:
         left_slots = left_stack.slot_modules(tile)
         right_slots = right_stack.slot_modules(tile)
 
+        wall_segments = 0
         for ix, (front_module, back_module) in enumerate(zip(front_slots, back_slots)):
             cx = ix * tile + tile * 0.5
             front_pos = self.local_rect_to_world(shape, root, (fx0, fy0, fx1, fy1), cx, 0.0, z_floor)
@@ -480,6 +518,7 @@ class BuildingAssembler:
             ):
                 wx, wy = p.x, p.y + y_sign * settings.wall_thickness * 0.5
                 self._build_facade_module(settings, shape, style, root, z_floor, face, wx, wy, module)
+                wall_segments += 1
 
         for iy, (left_module, right_module) in enumerate(zip(left_slots, right_slots)):
             cy = iy * tile + tile * 0.5
@@ -492,14 +531,17 @@ class BuildingAssembler:
             ):
                 wx, wy = p.x + x_sign * settings.wall_thickness * 0.5, p.y
                 self._build_facade_module(settings, shape, style, root, z_floor, face, wx, wy, module)
+                wall_segments += 1
 
         self._build_horizontal_accents(settings, shape, style, floor_profile, root, footprint_rect=(fx0, fy0, fx1, fy1))
         self._build_vertical_accents(settings, shape, style, floor_profile, root, front_slots, back_slots, left_slots, right_slots, footprint_rect=(fx0, fy0, fx1, fy1))
+        return wall_segments
 
     def build_outer_walls_cells(self, settings, shape, style, root, floor_profile, cells):
         tile = shape.tile_size
         z_floor = floor_profile.z_floor
         runs = self._boundary_runs(cells, tile)
+        wall_segments = 0
 
         for face in ("front", "back", "left", "right"):
             for fixed, a0, a1 in runs[face]:
@@ -527,6 +569,8 @@ class BuildingAssembler:
                         p = self.local_to_world(shape, root, fixed, c, z_floor)
                         wx, wy = p.x + settings.wall_thickness * 0.5, p.y
                     self._build_facade_module(settings, shape, style, root, z_floor, face, wx, wy, module)
+                    wall_segments += 1
+        return wall_segments
 
     def _build_facade_module(self, settings, shape, style, root, z_floor, face, wx, wy, module):
         module_id = module.id
@@ -898,7 +942,10 @@ class BuildingAssembler:
             self.add_box("floor", stair_w, run, exact_rise, self.local_to_world(shape, root, x_mid, y, z))
         top_cap_y = min(zone.y1 - 0.25, y_start + run * n_steps)
         top_cap_h = max(0.12, exact_rise)
-        self.add_box("floor", stair_w, max(0.28, run * 1.25), top_cap_h, self.local_to_world(shape, root, x_mid, top_cap_y, z_floor + clear_h + top_cap_h * 0.5 - 0.02))
+        top_cap_z = z_floor + clear_h - top_cap_h * 0.5
+        self.add_box("floor", stair_w, max(0.28, run * 1.25), top_cap_h, self.local_to_world(shape, root, x_mid, top_cap_y, top_cap_z))
+        stair_top_z = top_cap_z + top_cap_h * 0.5
+        return stair_top_z
 
     def assemble(self, settings, shape, style, root):
         pad = settings.lot_padding
@@ -910,67 +957,69 @@ class BuildingAssembler:
             self.local_to_world(shape, root, shape.width_m * 0.5, shape.depth_m * 0.5, -0.03),
         )
 
-        stair_opening_cells = self._opening_cells(shape)
         stair_segments_built = 0
         stairs_required = max(0, shape.floors - 1)
+        total_volumes = len(getattr(shape, "volume_blocks", ()))
+        print(f"[PBG] assemble start: volumes={total_volumes}, floors={shape.floors}")
 
-        for floor_profile in shape.floor_profiles:
-            z_floor = floor_profile.z_floor
+        for floor_index in range(shape.floors):
+            z_floor = floor_index * settings.floor_height
+            floor_profile = FloorLevel(
+                floor_index=floor_index,
+                z_floor=z_floor,
+                is_ground=(floor_index == 0),
+                is_top=(floor_index == shape.floors - 1),
+            )
             x0, y0, x1, y1 = shape.stair_opening
-            fx0, fy0, fx1, fy1 = shape.floor_footprints[floor_profile.floor_index] if getattr(shape, "floor_footprints", None) else (0.0, 0.0, shape.width_m, shape.depth_m)
-            fw = max(shape.tile_size * 2, fx1 - fx0)
-            fd = max(shape.tile_size * 2, fy1 - fy0)
-            floor_cells = set(shape.floor_cells[floor_profile.floor_index]) if getattr(shape, "floor_cells", None) else set()
-            stair_inside = self._stair_rect_fits((fx0, fy0, fx1, fy1), (x0, y0, x1, y1))
-            use_cell_shell = bool(floor_cells)
-            needs_opening_from_below = floor_profile.floor_index > 0 and shape.floors > 1
-            needs_opening_to_above = (not floor_profile.is_top) and shape.floors > 1
+            volume_rects = self._connected_rects_or_fallback(self._active_volume_rects(shape, floor_index))
+            if len(volume_rects) == 1 and len(self._active_volume_rects(shape, floor_index)) > 1:
+                print(f"[PBG] floor {floor_index}: disconnected volumes detected, fallback to simplified footprint")
+            floor_cells = set(shape.floor_cells[floor_index]) if getattr(shape, "floor_cells", None) else set()
+            needs_opening_from_below = floor_index > 0 and shape.floors > 1
+            needs_opening_to_above = floor_index < (shape.floors - 1) and shape.floors > 1
+            any_stair_inside = any(self._stair_rect_fits(rect, (x0, y0, x1, y1)) for rect in volume_rects)
             next_stair_inside = False
-            if (not floor_profile.is_top) and getattr(shape, "floor_footprints", None):
-                nx0, ny0, nx1, ny1 = shape.floor_footprints[floor_profile.floor_index + 1]
-                next_stair_inside = self._stair_rect_fits((nx0, ny0, nx1, ny1), (x0, y0, x1, y1))
-            can_build_stairs_here = (not floor_profile.is_top) and stair_inside and next_stair_inside
+            if floor_index < (shape.floors - 1):
+                next_rects = self._connected_rects_or_fallback(self._active_volume_rects(shape, floor_index + 1))
+                next_stair_inside = any(self._stair_rect_fits(rect, (x0, y0, x1, y1)) for rect in next_rects)
+            can_build_stairs_here = floor_index < (shape.floors - 1) and any_stair_inside and next_stair_inside
 
-            if floor_profile.is_ground:
-                if use_cell_shell:
-                    for rx0, ry0, rx1, ry1 in self._rectangles_from_cells(floor_cells, shape.tile_size):
-                        self.add_box("floor", rx1 - rx0, ry1 - ry0, settings.slab_thickness, self.local_to_world(shape, root, (rx0 + rx1) * 0.5, (ry0 + ry1) * 0.5, z_floor - settings.slab_thickness * 0.5))
-                else:
-                    self.add_box("floor", fw, fd, settings.slab_thickness, self.local_to_world(shape, root, fx0 + fw * 0.5, fy0 + fd * 0.5, z_floor - settings.slab_thickness * 0.5))
-            else:
-                if use_cell_shell:
-                    slab_cells = floor_cells - stair_opening_cells if needs_opening_from_below else floor_cells
-                    for rx0, ry0, rx1, ry1 in self._rectangles_from_cells(slab_cells, shape.tile_size):
-                        self.add_box("floor", rx1 - rx0, ry1 - ry0, settings.slab_thickness, self.local_to_world(shape, root, (rx0 + rx1) * 0.5, (ry0 + ry1) * 0.5, z_floor - settings.slab_thickness * 0.5))
-                elif stair_inside:
-                    self.add_ring_parts(shape, root, z_floor - settings.slab_thickness * 0.5, settings.slab_thickness, x0, y0, x1, y1, "floor")
-                else:
-                    self.add_box("floor", fw, fd, settings.slab_thickness, self.local_to_world(shape, root, fx0 + fw * 0.5, fy0 + fd * 0.5, z_floor - settings.slab_thickness * 0.5))
+            for rect in volume_rects:
+                rx0, ry0, rx1, ry1 = rect
+                rw = max(shape.tile_size * 2, rx1 - rx0)
+                rd = max(shape.tile_size * 2, ry1 - ry0)
+                rect_has_stair = self._stair_rect_fits(rect, (x0, y0, x1, y1))
+                rect_opening = (x0, y0, x1, y1) if rect_has_stair else None
 
-            if not floor_profile.is_top:
-                if use_cell_shell:
-                    cap_cells = floor_cells - stair_opening_cells if needs_opening_to_above else floor_cells
-                    for rx0, ry0, rx1, ry1 in self._rectangles_from_cells(cap_cells, shape.tile_size):
-                        self.add_box("trim", rx1 - rx0, ry1 - ry0, settings.slab_thickness, self.local_to_world(shape, root, (rx0 + rx1) * 0.5, (ry0 + ry1) * 0.5, z_floor + settings.floor_height + settings.slab_thickness * 0.5))
-                elif stair_inside:
-                    self.add_ring_parts(shape, root, z_floor + settings.floor_height + settings.slab_thickness * 0.5, settings.slab_thickness, x0, y0, x1, y1, "trim")
+                if floor_index == 0:
+                    self.add_box("floor", rw, rd, settings.slab_thickness, self.local_to_world(shape, root, rx0 + rw * 0.5, ry0 + rd * 0.5, z_floor - settings.slab_thickness * 0.5))
                 else:
-                    self.add_box("trim", fw, fd, settings.slab_thickness, self.local_to_world(shape, root, fx0 + fw * 0.5, fy0 + fd * 0.5, z_floor + settings.floor_height + settings.slab_thickness * 0.5))
-            else:
-                if use_cell_shell:
-                    for rx0, ry0, rx1, ry1 in self._rectangles_from_cells(floor_cells, shape.tile_size):
-                        self.add_box("roof", rx1 - rx0, ry1 - ry0, settings.slab_thickness, self.local_to_world(shape, root, (rx0 + rx1) * 0.5, (ry0 + ry1) * 0.5, z_floor + settings.floor_height + settings.slab_thickness * 0.5))
-                else:
-                    self.add_box("roof", fw, fd, settings.slab_thickness, self.local_to_world(shape, root, fx0 + fw * 0.5, fy0 + fd * 0.5, z_floor + settings.floor_height + settings.slab_thickness * 0.5))
+                    if rect_opening and needs_opening_from_below:
+                        self.add_ring_parts(shape, root, z_floor - settings.slab_thickness * 0.5, settings.slab_thickness, x0, y0, x1, y1, "floor")
+                    else:
+                        self.add_box("floor", rw, rd, settings.slab_thickness, self.local_to_world(shape, root, rx0 + rw * 0.5, ry0 + rd * 0.5, z_floor - settings.slab_thickness * 0.5))
 
-            if use_cell_shell:
-                self.build_outer_walls_cells(settings, shape, style, root, floor_profile, floor_cells)
+                if floor_index < (shape.floors - 1):
+                    if rect_opening and needs_opening_to_above:
+                        self.add_ring_parts(shape, root, z_floor + settings.floor_height + settings.slab_thickness * 0.5, settings.slab_thickness, x0, y0, x1, y1, "trim")
+                    else:
+                        self.add_box("trim", rw, rd, settings.slab_thickness, self.local_to_world(shape, root, rx0 + rw * 0.5, ry0 + rd * 0.5, z_floor + settings.floor_height + settings.slab_thickness * 0.5))
+                else:
+                    self.add_box("roof", rw, rd, settings.slab_thickness, self.local_to_world(shape, root, rx0 + rw * 0.5, ry0 + rd * 0.5, z_floor + settings.floor_height + settings.slab_thickness * 0.5))
+
+            wall_segments = 0
+            if floor_cells:
+                wall_segments = self.build_outer_walls_cells(settings, shape, style, root, floor_profile, floor_cells)
             else:
-                self.build_outer_walls(settings, shape, style, root, floor_profile, footprint_rect=(fx0, fy0, fx1, fy1))
-            if floor_profile.is_ground and stair_inside:
+                for rect in volume_rects:
+                    wall_segments += self.build_outer_walls(settings, shape, style, root, floor_profile, footprint_rect=rect)
+            print(f"[PBG] floor {floor_index}: volumes={len(volume_rects)} walls={wall_segments}")
+            if floor_profile.is_ground and any_stair_inside:
                 self.build_inner_walls(settings, shape, root, floor_profile)
 
             if floor_profile.is_ground:
+                fx0, fy0, fx1, fy1 = volume_rects[0]
+                fw = max(shape.tile_size * 2, fx1 - fx0)
                 self.add_box(
                     "floor",
                     2.4,
@@ -980,7 +1029,9 @@ class BuildingAssembler:
                 )
 
             if can_build_stairs_here:
-                self.build_stairs(settings, shape, root, floor_profile)
+                stair_top_z = self.build_stairs(settings, shape, root, floor_profile)
+                expected_top = z_floor + settings.floor_height
+                print(f"[PBG] stairs floor {floor_index}->{floor_index + 1}: top_z={stair_top_z:.3f} target_z={expected_top:.3f}")
                 stair_segments_built += 1
 
         roof_z = shape.floors * settings.floor_height
