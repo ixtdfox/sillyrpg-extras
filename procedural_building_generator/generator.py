@@ -77,6 +77,13 @@ class BuildingGenerator:
         self.clear()
 
         shape = self.resolve_shape(safe_settings, rebuild_shape)
+        debug_msg = (
+            f"tier={getattr(shape, 'composition_tier', '?')} "
+            f"stairs={getattr(shape, 'stair_status', 'unknown')} "
+            f"fallback={getattr(shape, 'fallback_reason', '') or 'none'}"
+        )
+        settings["pb_debug_shape"] = debug_msg
+        print(f"[PBG] {debug_msg}")
         style = BuildingStyle.from_settings(safe_settings, self.fast_mode)
         apply_style_material_tuning(self.mats, style)
         assembler = BuildingAssembler(self.batch, self.col, self.asset_helper_col, self.asset_instance_col)

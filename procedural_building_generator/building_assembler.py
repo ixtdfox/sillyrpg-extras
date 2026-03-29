@@ -17,6 +17,7 @@ class BuildingAssembler:
     SURFACE_EPSILON = 0.012
     MIN_WINDOW_WIDTH = 0.8
     MIN_WINDOW_HEIGHT = 0.7
+    STAIR_GAP_EPS = 1e-6
 
     def __init__(self, batch: MeshBatcher, generated_collection, asset_helper_collection, asset_instance_collection):
         self.batch = batch
@@ -73,6 +74,33 @@ class BuildingAssembler:
                     remaining.discard((ix, iy))
             rects.append((sx * tile, sy * tile, ex * tile, ey * tile))
         return rects
+
+    def _opening_cells(self, shape):
+        x0, y0, x1, y1 = shape.stair_opening
+        cells = set()
+        nx = max(1, int(round(shape.width_m / shape.tile_size)))
+        ny = max(1, int(round(shape.depth_m / shape.tile_size)))
+        for ix in range(nx):
+            for iy in range(ny):
+                cx0 = ix * shape.tile_size
+                cy0 = iy * shape.tile_size
+                cx1 = cx0 + shape.tile_size
+                cy1 = cy0 + shape.tile_size
+                if not (cx1 <= x0 + self.STAIR_GAP_EPS or cx0 >= x1 - self.STAIR_GAP_EPS or cy1 <= y0 + self.STAIR_GAP_EPS or cy0 >= y1 - self.STAIR_GAP_EPS):
+                    cells.add((ix, iy))
+        return cells
+
+    @staticmethod
+    def _stair_rect_fits(footprint_rect, opening_rect):
+        fx0, fy0, fx1, fy1 = footprint_rect
+        x0, y0, x1, y1 = opening_rect
+        return fx0 <= x0 and fy0 <= y0 and fx1 >= x1 and fy1 >= y1
+
+    @staticmethod
+    def _cell_contains_point(cells, tile, x, y):
+        ix = int(math.floor(x / tile + 1e-6))
+        iy = int(math.floor(y / tile + 1e-6))
+        return (ix, iy) in cells
 
     def _boundary_runs(self, cells, tile):
         cells = set(cells)
@@ -806,6 +834,7 @@ class BuildingAssembler:
 
         zone = shape.stair_zone
         z_floor = floor_profile.z_floor
+        ground_cells = set(shape.floor_cells[0]) if getattr(shape, "floor_cells", None) else set()
         for ori, a, b, fixed, s0, s1 in build_adjacency(shape.rooms):
             if ori == "V" and zone.x0 < fixed < zone.x1 and not (s1 <= zone.y0 or s0 >= zone.y1):
                 continue
@@ -817,6 +846,10 @@ class BuildingAssembler:
                 tc = p + shape.tile_size * 0.5
                 door_centers = lookup_v.get(round(fixed, 3), []) if ori == "V" else lookup_h.get(round(fixed, 3), [])
                 make_door = any(abs(tc - dc) <= shape.tile_size * 0.51 for dc in door_centers)
+                px, py = (fixed, tc) if ori == "V" else (tc, fixed)
+                if ground_cells and not self._cell_contains_point(ground_cells, shape.tile_size, px, py):
+                    p += shape.tile_size
+                    continue
 
                 if ori == "V":
                     wp = self.local_to_world(shape, root, fixed, tc, z_floor)
@@ -850,28 +883,22 @@ class BuildingAssembler:
         z_floor = floor_profile.z_floor
         zone = shape.stair_zone
         clear_h = settings.floor_height
-        rise = settings.stairs_rise_step
-        run = settings.stairs_run_step
+        rise = max(0.05, settings.stairs_rise_step)
         stair_w = min(settings.stairs_width, (zone.x1 - zone.x0) - 0.2)
         n_steps = max(1, math.ceil(clear_h / rise))
         exact_rise = clear_h / n_steps
-        first = n_steps // 2
-        second = n_steps - first
-        landing_depth = 1.0
+        y_start = zone.y0 + 0.25
+        y_end = zone.y1 - 0.2
+        available_depth = max(0.8, y_end - y_start)
+        run = max(0.12, available_depth / n_steps)
         x_mid = (zone.x0 + zone.x1) * 0.5
-        y_start = zone.y0 + 0.35
-        for i in range(first):
+        for i in range(n_steps):
             z = z_floor + exact_rise * (i + 0.5)
             y = y_start + run * i
             self.add_box("floor", stair_w, run, exact_rise, self.local_to_world(shape, root, x_mid, y, z))
-        landing_y = y_start + run * first + landing_depth * 0.5
-        landing_z = z_floor + exact_rise * first + 0.05
-        self.add_box("floor", stair_w, landing_depth, 0.10, self.local_to_world(shape, root, x_mid, landing_y, landing_z))
-        y2 = y_start + run * first + landing_depth
-        for i in range(second):
-            z = z_floor + exact_rise * (first + i + 0.5)
-            y = y2 + run * i
-            self.add_box("floor", stair_w, run, exact_rise, self.local_to_world(shape, root, x_mid, y, z))
+        top_cap_y = min(zone.y1 - 0.25, y_start + run * n_steps)
+        top_cap_h = max(0.12, exact_rise)
+        self.add_box("floor", stair_w, max(0.28, run * 1.25), top_cap_h, self.local_to_world(shape, root, x_mid, top_cap_y, z_floor + clear_h + top_cap_h * 0.5 - 0.02))
 
     def assemble(self, settings, shape, style, root):
         pad = settings.lot_padding
@@ -883,6 +910,10 @@ class BuildingAssembler:
             self.local_to_world(shape, root, shape.width_m * 0.5, shape.depth_m * 0.5, -0.03),
         )
 
+        stair_opening_cells = self._opening_cells(shape)
+        stair_segments_built = 0
+        stairs_required = max(0, shape.floors - 1)
+
         for floor_profile in shape.floor_profiles:
             z_floor = floor_profile.z_floor
             x0, y0, x1, y1 = shape.stair_opening
@@ -890,8 +921,15 @@ class BuildingAssembler:
             fw = max(shape.tile_size * 2, fx1 - fx0)
             fd = max(shape.tile_size * 2, fy1 - fy0)
             floor_cells = set(shape.floor_cells[floor_profile.floor_index]) if getattr(shape, "floor_cells", None) else set()
-            stair_inside = fx0 <= x0 and fy0 <= y0 and fx1 >= x1 and fy1 >= y1
+            stair_inside = self._stair_rect_fits((fx0, fy0, fx1, fy1), (x0, y0, x1, y1))
             use_cell_shell = bool(floor_cells)
+            needs_opening_from_below = floor_profile.floor_index > 0 and shape.floors > 1
+            needs_opening_to_above = (not floor_profile.is_top) and shape.floors > 1
+            next_stair_inside = False
+            if (not floor_profile.is_top) and getattr(shape, "floor_footprints", None):
+                nx0, ny0, nx1, ny1 = shape.floor_footprints[floor_profile.floor_index + 1]
+                next_stair_inside = self._stair_rect_fits((nx0, ny0, nx1, ny1), (x0, y0, x1, y1))
+            can_build_stairs_here = (not floor_profile.is_top) and stair_inside and next_stair_inside
 
             if floor_profile.is_ground:
                 if use_cell_shell:
@@ -901,7 +939,8 @@ class BuildingAssembler:
                     self.add_box("floor", fw, fd, settings.slab_thickness, self.local_to_world(shape, root, fx0 + fw * 0.5, fy0 + fd * 0.5, z_floor - settings.slab_thickness * 0.5))
             else:
                 if use_cell_shell:
-                    for rx0, ry0, rx1, ry1 in self._rectangles_from_cells(floor_cells, shape.tile_size):
+                    slab_cells = floor_cells - stair_opening_cells if needs_opening_from_below else floor_cells
+                    for rx0, ry0, rx1, ry1 in self._rectangles_from_cells(slab_cells, shape.tile_size):
                         self.add_box("floor", rx1 - rx0, ry1 - ry0, settings.slab_thickness, self.local_to_world(shape, root, (rx0 + rx1) * 0.5, (ry0 + ry1) * 0.5, z_floor - settings.slab_thickness * 0.5))
                 elif stair_inside:
                     self.add_ring_parts(shape, root, z_floor - settings.slab_thickness * 0.5, settings.slab_thickness, x0, y0, x1, y1, "floor")
@@ -910,7 +949,8 @@ class BuildingAssembler:
 
             if not floor_profile.is_top:
                 if use_cell_shell:
-                    for rx0, ry0, rx1, ry1 in self._rectangles_from_cells(floor_cells, shape.tile_size):
+                    cap_cells = floor_cells - stair_opening_cells if needs_opening_to_above else floor_cells
+                    for rx0, ry0, rx1, ry1 in self._rectangles_from_cells(cap_cells, shape.tile_size):
                         self.add_box("trim", rx1 - rx0, ry1 - ry0, settings.slab_thickness, self.local_to_world(shape, root, (rx0 + rx1) * 0.5, (ry0 + ry1) * 0.5, z_floor + settings.floor_height + settings.slab_thickness * 0.5))
                 elif stair_inside:
                     self.add_ring_parts(shape, root, z_floor + settings.floor_height + settings.slab_thickness * 0.5, settings.slab_thickness, x0, y0, x1, y1, "trim")
@@ -939,8 +979,9 @@ class BuildingAssembler:
                     self.local_to_world(shape, root, fx0 + fw * 0.5, fy0 + settings.wall_thickness + 1.2, z_floor + 0.02),
                 )
 
-            if (not use_cell_shell) and (not floor_profile.is_top) and stair_inside:
+            if can_build_stairs_here:
                 self.build_stairs(settings, shape, root, floor_profile)
+                stair_segments_built += 1
 
         roof_z = shape.floors * settings.floor_height
         top_rect = shape.floor_footprints[-1] if getattr(shape, "floor_footprints", None) else (0.0, 0.0, shape.width_m, shape.depth_m)
@@ -949,3 +990,5 @@ class BuildingAssembler:
         self._build_roof_silhouette(settings, shape, style, root, roof_z, blocked_rects, rng, roof_rect=top_rect)
         self._build_rooftop_equipment(settings, shape, style, root, roof_z, blocked_rects, rng, roof_rect=top_rect)
         self._build_top_floor_accents(settings, shape, style, root, roof_z, blocked_rects, rng, roof_rect=top_rect)
+        if stairs_required > 0 and stair_segments_built < stairs_required:
+            print(f"[PBG] stair placement failed: built {stair_segments_built}/{stairs_required} segments")
