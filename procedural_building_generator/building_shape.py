@@ -156,6 +156,10 @@ def build_volume_blocks(width: float, depth: float, floors: int, tile: float, se
     main_y0 = 0.0 if rng.random() < 0.7 else _snap_tile((depth - main_d) * rng.random() * 0.45, tile)
     main_x0, main_y0, main_x1, main_y1 = _clamp_rect((main_x0, main_y0, main_x0 + main_w, main_y0 + main_d), width, depth, tile)
     main = VolumeBlock("main", main_x0, main_y0, main_x1, main_y1, 0, floors)
+    if floors >= 2:
+        # Robustness over variety for multi-floor houses:
+        # keep a single coherent full-height mass to avoid missing 2F walls.
+        return (main, VolumeBlock("upper", main.x0, main.y0, main.x1, main.y1, 1, floors - 1))
     blocks = [main]
 
     entrance_w = _snap_tile(max(tile * 2, main.width * (0.35 + rng.random() * 0.2)), tile)

@@ -896,8 +896,9 @@ class BuildingAssembler:
             z = z_floor + exact_rise * (i + 0.5)
             y = y_start + run * i
             self.add_box("floor", stair_w, run, exact_rise, self.local_to_world(shape, root, x_mid, y, z))
-        top_cap_y = min(y_end - run * 0.25, y_start + run * (n_steps - 0.25))
-        self.add_box("floor", stair_w, max(0.2, run * 1.1), 0.08, self.local_to_world(shape, root, x_mid, top_cap_y, z_floor + clear_h - 0.04))
+        top_cap_y = min(zone.y1 - 0.25, y_start + run * n_steps)
+        top_cap_h = max(0.12, exact_rise)
+        self.add_box("floor", stair_w, max(0.28, run * 1.25), top_cap_h, self.local_to_world(shape, root, x_mid, top_cap_y, z_floor + clear_h + top_cap_h * 0.5 - 0.02))
 
     def assemble(self, settings, shape, style, root):
         pad = settings.lot_padding
