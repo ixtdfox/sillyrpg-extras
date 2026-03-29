@@ -129,20 +129,16 @@ def proc_building_timer():
     now = time.perf_counter()
     s = scene.pb_settings
 
-    controller_changed = controller_sig != _LAST_CONTROLLER_SIG
-    shape_changed = shape_sig != _LAST_SHAPE_SIG
-    style_changed = style_sig != _LAST_STYLE_SIG
-
-    if controller_changed or shape_changed or style_changed:
-        _LAST_CONTROLLER_SIG = controller_sig
-        _LAST_SHAPE_SIG = shape_sig
-        _LAST_STYLE_SIG = style_sig
-        _LAST_CHANGE_TS = now
-
     pause_reason = timer_pause_reason()
     s.pb_timer_pause_reason = pause_reason or "running"
     if pause_reason:
         return 0.12
+
+    controller_changed = controller_sig != _LAST_CONTROLLER_SIG
+    shape_changed = shape_sig != _LAST_SHAPE_SIG
+    style_changed = style_sig != _LAST_STYLE_SIG
+    if controller_changed or shape_changed or style_changed:
+        _LAST_CHANGE_TS = now
 
     time_since_change_ms = (now - _LAST_CHANGE_TS) * 1000.0
     time_since_rebuild_ms = (now - _LAST_REBUILD_TS) * 1000.0
@@ -160,6 +156,9 @@ def proc_building_timer():
             try:
                 style_only_change = style_changed and not (controller_changed or shape_changed or quality_changed)
                 BuildingGenerator().build(quality, rebuild_shape=not style_only_change)
+                _LAST_CONTROLLER_SIG = controller_sig
+                _LAST_SHAPE_SIG = shape_sig
+                _LAST_STYLE_SIG = style_sig
                 _LAST_REBUILD_TS = now
                 _LAST_QUALITY = quality
                 s.pb_last_rebuild_quality = quality
