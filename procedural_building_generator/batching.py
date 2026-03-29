@@ -6,6 +6,8 @@ from .utils import GENERATOR_TAG, world_box
 
 
 class MeshBatcher:
+    _INTENTIONAL_OVERLAP_GROUPS = {"wall", "roof"}
+
     def __init__(self):
         self.data = {}
         self._bbox_records = []
@@ -34,6 +36,8 @@ class MeshBatcher:
         self._bbox_records.append((group, bbox))
 
     def _debug_overlap_check(self, group, bbox):
+        if group in self._INTENTIONAL_OVERLAP_GROUPS:
+            return True
         eps = 0.0005
         x0, y0, z0, x1, y1, z1 = bbox
         for other_group, other in self._bbox_records[-240:]:
