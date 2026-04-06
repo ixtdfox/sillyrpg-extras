@@ -39,6 +39,14 @@ class FLOORPLAN_PT_panel(bpy.types.Panel):
         for name in ("wall_height", "wall_thickness", "floor_thickness", "corridor_width", "door_width", "entry_door_width", "entry_door_thickness", "door_height"):
             col.prop(props, name)
 
+        mod_box = box.box()
+        mod_box.label(text="Модульная геометрия")
+        mod_box.prop(props, "modular_tiles_enabled")
+        sub = mod_box.column(align=True)
+        sub.enabled = props.modular_tiles_enabled
+        sub.prop(props, "wall_tile_width")
+        sub.prop(props, "surface_tile_size")
+
         box = layout.box()
         box.label(text="Окна")
         col = box.column(align=True)

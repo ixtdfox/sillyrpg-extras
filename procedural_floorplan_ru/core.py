@@ -40,9 +40,9 @@ STAIR_DOOR_CLEARANCE = 0.45
 STAIR_WINDOW_CLEARANCE = 0.35
 WINDOW_SILL_HEIGHT = 0.9
 WINDOW_HEIGHT = 1.25
-WINDOW_MIN_WIDTH = 0.65
+WINDOW_MIN_WIDTH = 1.0
 WINDOW_END_MARGIN = 0.45
-WINDOW_STRIP_WIDTH = 0.7
+WINDOW_STRIP_WIDTH = 1.0
 OUTER_MARGIN = 0.0  # rooms now touch the inner face of the exterior wall
 ROOM_GAP = 0.0  # keep adjacent rooms flush so we do not create double walls
 
@@ -72,6 +72,10 @@ SEED = 42
 MIN_FLOORS = 1
 MAX_FLOORS = 3
 FLOOR_TO_FLOOR_HEIGHT = WALL_HEIGHT + FLOOR_THICKNESS
+
+MODULAR_TILES_ENABLED = True
+WALL_TILE_WIDTH = 1.0
+SURFACE_TILE_SIZE = 1.0
 
 # creative: upper floors may have different footprints
 # strict: every floor is scaled to match the 1st floor footprint exactly
@@ -256,6 +260,122 @@ def add_box(col, name, x, y, z, sx, sy, sz, mat=None):
         else:
             obj.data.materials.append(mat)
     return obj
+
+
+def _split_length_into_tiles(length: float, nominal: float, keep_uniform: bool = False) -> List[Tuple[float, float]]:
+    if length <= EPS:
+        return []
+    nominal = max(EPS, nominal)
+    if keep_uniform:
+        count = max(1, int(round(length / nominal)))
+        tile = length / count
+        cursor = 0.0
+        out = []
+        for _ in range(count):
+            out.append((cursor + tile * 0.5, tile))
+            cursor += tile
+        return out
+
+    count = max(1, int(math.floor((length + EPS) / nominal)))
+    out = []
+    cursor = 0.0
+    for _ in range(count):
+        out.append((cursor + nominal * 0.5, nominal))
+        cursor += nominal
+    remainder = length - cursor
+    if remainder > EPS:
+        if out and remainder < nominal * 0.35:
+            prev_center, prev_size = out[-1]
+            new_size = prev_size + remainder
+            out[-1] = (length - new_size * 0.5, new_size)
+        else:
+            out.append((cursor + remainder * 0.5, remainder))
+    return out
+
+
+def _modular_unit() -> float:
+    return max(EPS, WALL_TILE_WIDTH if MODULAR_TILES_ENABLED else 1.0)
+
+
+def _snap_local_to_unit(value: float, unit: float) -> float:
+    return round(value / unit) * unit
+
+
+def _snap_opening_to_module(seg_start: float, seg_end: float, opening: Opening, unit: float) -> Optional[Opening]:
+    s = max(seg_start, opening.start)
+    e = min(seg_end, opening.end)
+    if e - s <= EPS:
+        return None
+
+    available = seg_end - seg_start
+    if available <= EPS:
+        return None
+
+    max_units = max(1, int(math.floor((available + EPS) / unit)))
+    preferred_units = max(1, int(round((e - s) / unit)))
+    units = min(preferred_units, max_units)
+    snapped_width = units * unit
+
+    desired_start_local = (s + e) * 0.5 - snapped_width * 0.5 - seg_start
+    snapped_start_local = _snap_local_to_unit(desired_start_local, unit)
+    snapped_start_local = clamp(snapped_start_local, 0.0, max(0.0, available - snapped_width))
+
+    snapped_start = seg_start + snapped_start_local
+    snapped_end = min(seg_end, snapped_start + snapped_width)
+    if snapped_end - snapped_start <= EPS:
+        return None
+    return Opening(snapped_start, snapped_end, opening.z0, opening.z1)
+
+
+def add_tiled_patch(col, name, x, y, z, sx, sy, sz, tile_x: float, tile_y: float, mat=None, keep_uniform: bool = False):
+    x_parts = _split_length_into_tiles(sx, tile_x, keep_uniform=keep_uniform)
+    y_parts = _split_length_into_tiles(sy, tile_y, keep_uniform=keep_uniform)
+    base_x = x - sx * 0.5
+    base_y = y - sy * 0.5
+    created = []
+    for ix, (off_x, part_x) in enumerate(x_parts):
+        cx = base_x + off_x
+        for iy, (off_y, part_y) in enumerate(y_parts):
+            cy = base_y + off_y
+            created.append(add_box(col, f"{name}_tile_{ix}_{iy}", cx, cy, z, part_x, part_y, sz, mat))
+    return created
+
+
+def add_world_aligned_surface_tiles(col, name, x, y, z, sx, sy, sz, tile_x: float, tile_y: float, mat=None):
+    """Create exact-size horizontal tiles snapped to the global meter grid.
+
+    This is mainly used for roofs so adjacent roof patches line up to the same
+    1x1 meter grid instead of producing remainder strips like 0.396 x 0.783.
+    Tiles may extend slightly beyond a patch boundary when the footprint is not
+    divisible by the tile size, but every created tile keeps the exact nominal size.
+    """
+    tile_x = max(EPS, float(tile_x))
+    tile_y = max(EPS, float(tile_y))
+    min_x = x - sx * 0.5
+    max_x = x + sx * 0.5
+    min_y = y - sy * 0.5
+    max_y = y + sy * 0.5
+
+    start_ix = math.floor(min_x / tile_x)
+    end_ix = math.ceil(max_x / tile_x)
+    start_iy = math.floor(min_y / tile_y)
+    end_iy = math.ceil(max_y / tile_y)
+
+    created = []
+    for ix in range(start_ix, end_ix):
+        cx = (ix + 0.5) * tile_x
+        cell_min_x = cx - tile_x * 0.5
+        cell_max_x = cx + tile_x * 0.5
+        if min(cell_max_x, max_x) - max(cell_min_x, min_x) <= EPS:
+            continue
+        for iy in range(start_iy, end_iy):
+            cy = (iy + 0.5) * tile_y
+            cell_min_y = cy - tile_y * 0.5
+            cell_max_y = cy + tile_y * 0.5
+            if min(cell_max_y, max_y) - max(cell_min_y, min_y) <= EPS:
+                continue
+            created.append(add_box(col, f"{name}_tile_{ix}_{iy}", cx, cy, z, tile_x, tile_y, sz, mat))
+    return created
 
 
 def add_text(col, text, x, y, z, size=TEXT_SIZE):
@@ -733,6 +853,19 @@ def add_wall_segment(col, name, orientation, fixed, start, end, z0, height, thic
     length = end - start
     if length <= EPS:
         return
+    if MODULAR_TILES_ENABLED:
+        # Keep all tiles within the current wall strip the same length.
+        # This avoids a tiny remainder tile near openings that tends to create
+        # visual overlaps / z-fighting with the neighboring strip.
+        parts = _split_length_into_tiles(length, WALL_TILE_WIDTH, keep_uniform=True)
+        axis_start = start
+        for idx, (offset, tile_len) in enumerate(parts):
+            center = axis_start + offset
+            if orientation == "H":
+                add_box(col, f"{name}_tile_{idx}", center, fixed, z0 + height * 0.5, tile_len, thickness, height, mat)
+            else:
+                add_box(col, f"{name}_tile_{idx}", fixed, center, z0 + height * 0.5, thickness, tile_len, height, mat)
+        return
     if orientation == "H":
         add_box(col, name, (start + end) * 0.5, fixed, z0 + height * 0.5, length, thickness, height, mat)
     else:
@@ -748,6 +881,15 @@ def add_wall_with_openings(col, name, orientation, fixed, start, end, z0, height
         oz1 = min(z0 + height, op.z1)
         if e - s > EPS and oz1 - oz0 > EPS:
             clean_openings.append(Opening(s, e, oz0, oz1))
+
+    if MODULAR_TILES_ENABLED and clean_openings:
+        unit = _modular_unit()
+        snapped_openings = []
+        for op in clean_openings:
+            snapped = _snap_opening_to_module(start, end, op, unit)
+            if snapped is not None:
+                snapped_openings.append(snapped)
+        clean_openings = prune_overlapping_openings(snapped_openings)
 
     cuts = [start, end]
     for op in clean_openings:
@@ -1095,6 +1237,16 @@ def make_window_opening(start: float, end: float, sill: float = WINDOW_SILL_HEIG
     return Opening(start, end, sill, sill + height)
 
 
+def quantize_window_width(desired: float, span: float) -> float:
+    available = span - WINDOW_END_MARGIN * 2
+    if available < 1.0 - EPS:
+        return 0.0
+    max_modules = max(1, int(math.floor(available + EPS)))
+    width = int(round(desired))
+    width = max(1, min(width, max_modules))
+    return float(width)
+
+
 def outer_window_openings_for_room(room: Room, ori: str, fixed: float, start: float, end: float):
     ops = []
     edge_tol = max(WALL_THICKNESS * 0.75, 0.22)
@@ -1111,21 +1263,26 @@ def outer_window_openings_for_room(room: Room, ori: str, fixed: float, start: fl
         if span < WINDOW_MIN_WIDTH + WINDOW_END_MARGIN * 2:
             return []
         if zone in ("bathroom", "storage", "laundry", "pantry"):
-            w = min(WINDOW_STRIP_WIDTH, max(WINDOW_MIN_WIDTH, span * 0.28))
+            w = quantize_window_width(min(WINDOW_STRIP_WIDTH, max(WINDOW_MIN_WIDTH, span * 0.28)), span)
+            if w < 1.0 - EPS:
+                return []
             c = (a0 + a1) * 0.5
             return [make_window_opening(c - w * 0.5, c + w * 0.5, 1.15, 0.75)]
         if zone == "living":
-            w = max(WINDOW_MIN_WIDTH, span * 0.58)
-            w = min(w, span - WINDOW_END_MARGIN * 2)
+            w = quantize_window_width(max(WINDOW_MIN_WIDTH, span * 0.58), span)
+            if w < 1.0 - EPS:
+                return []
             c = (a0 + a1) * 0.5
             return [make_window_opening(c - w * 0.5, c + w * 0.5, 0.65, 1.65)]
         if zone == "kitchen":
-            w = max(WINDOW_MIN_WIDTH, span * 0.42)
-            w = min(w, span - WINDOW_END_MARGIN * 2)
+            w = quantize_window_width(max(WINDOW_MIN_WIDTH, span * 0.42), span)
+            if w < 1.0 - EPS:
+                return []
             c = (a0 + a1) * 0.5
             return [make_window_opening(c - w * 0.5, c + w * 0.5, 1.0, 1.05)]
-        w = max(WINDOW_MIN_WIDTH, span * 0.45)
-        w = min(w, span - WINDOW_END_MARGIN * 2)
+        w = quantize_window_width(max(WINDOW_MIN_WIDTH, span * 0.45), span)
+        if w < 1.0 - EPS:
+            return []
         c = (a0 + a1) * 0.5
         return [make_window_opening(c - w * 0.5, c + w * 0.5, 0.8, 1.35)]
 
@@ -1716,7 +1873,7 @@ def is_inner_face_of_exterior_for_rect(rect: Rect, ori: str, fixed: float) -> bo
 
 def opening_for_outer_entrance_on_rect(rect: Rect, ori: str, fixed: float, start: float, end: float):
     entrance_center_x = HOUSE_WIDTH * 0.5
-    entrance_half = 0.6
+    entrance_half = max(_modular_unit() * 0.5, 0.5)
     entrance = Opening(entrance_center_x - entrance_half, entrance_center_x + entrance_half)
 
     if ori != "H":
@@ -1741,13 +1898,13 @@ def edge_openings_to_corridor(room: Rect, corridor: Rect, ori: str, fixed: float
             iv = overlap(start, end, max(room.y, corridor.y), min(room.y2, corridor.y2))
             if iv:
                 mid = (iv[0] + iv[1]) * 0.5
-                half = min(DOOR_WIDTH * 0.5, (iv[1] - iv[0]) * 0.4)
+                half = min(max(_modular_unit() * 0.5, DOOR_WIDTH * 0.5), (iv[1] - iv[0]) * 0.4)
                 ops.append(Opening(mid - half, mid + half, 0.0, DOOR_HEIGHT))
         if almost(fixed, room.x) and almost(room.x, corridor.x2):
             iv = overlap(start, end, max(room.y, corridor.y), min(room.y2, corridor.y2))
             if iv:
                 mid = (iv[0] + iv[1]) * 0.5
-                half = min(DOOR_WIDTH * 0.5, (iv[1] - iv[0]) * 0.4)
+                half = min(max(_modular_unit() * 0.5, DOOR_WIDTH * 0.5), (iv[1] - iv[0]) * 0.4)
                 ops.append(Opening(mid - half, mid + half, 0.0, DOOR_HEIGHT))
     else:
         if almost(fixed, room.y2) and almost(room.y2, corridor.y):
@@ -1886,23 +2043,22 @@ def boundary_window_openings_for_room(room: Room, ori: str, start: float, end: f
         return []
     zone = room.zone
     if room.key == "living":
-        width = min(span - WINDOW_END_MARGIN * 2, max(1.8, span * 0.52))
+        width = quantize_window_width(max(2.0, span * 0.52), span)
         sill = 0.45
         height = max(1.55, WINDOW_HEIGHT + 0.2)
     elif room.key == "kitchen" or room.key == "study" or room.key.startswith("bed_") or room.key == "dining":
-        width = min(span - WINDOW_END_MARGIN * 2, max(1.1, span * 0.38))
+        width = quantize_window_width(max(1.0, span * 0.38), span)
         sill = WINDOW_SILL_HEIGHT
         height = WINDOW_HEIGHT
     elif room.key.startswith("bath") or room.key in {"laundry", "pantry", "storage"}:
-        width = min(span - WINDOW_END_MARGIN * 2, max(WINDOW_MIN_WIDTH, WINDOW_STRIP_WIDTH))
+        width = quantize_window_width(max(WINDOW_MIN_WIDTH, WINDOW_STRIP_WIDTH), span)
         sill = 1.35
         height = 0.72
     else:
-        width = min(span - WINDOW_END_MARGIN * 2, max(0.9, span * 0.33))
+        width = quantize_window_width(max(1.0, span * 0.33), span)
         sill = WINDOW_SILL_HEIGHT
         height = WINDOW_HEIGHT
-    width = max(WINDOW_MIN_WIDTH, min(width, span - WINDOW_END_MARGIN * 2))
-    if width <= WINDOW_MIN_WIDTH - EPS:
+    if width < 1.0 - EPS:
         return []
     mid = (start + end) * 0.5
     return [make_window_opening(mid - width * 0.5, mid + width * 0.5, sill, height)]
@@ -1944,22 +2100,34 @@ def draw_geometry(col, rooms: List[Room], corridor: Rect, stair: Optional[StairP
     if use_legacy_quad_shell:
         base_rect = Rect(0.0, 0.0, HOUSE_WIDTH, HOUSE_DEPTH)
         for i, patch in enumerate(subtract_rect(base_rect, void_rect)):
-            add_box(col, f"Base_{int(z_offset*1000)}_{i}", patch.cx, patch.cy, z_offset - FLOOR_THICKNESS*0.5, patch.w, patch.h, FLOOR_THICKNESS, base_mat)
+            if MODULAR_TILES_ENABLED:
+                add_tiled_patch(col, f"Base_{int(z_offset*1000)}_{i}", patch.cx, patch.cy, z_offset - FLOOR_THICKNESS*0.5, patch.w, patch.h, FLOOR_THICKNESS, SURFACE_TILE_SIZE, SURFACE_TILE_SIZE, base_mat)
+            else:
+                add_box(col, f"Base_{int(z_offset*1000)}_{i}", patch.cx, patch.cy, z_offset - FLOOR_THICKNESS*0.5, patch.w, patch.h, FLOOR_THICKNESS, base_mat)
     else:
         footprint_rects = footprint_rects_from_layout(valid_rooms, corridor, open_void=open_void)
         for i, patch in enumerate(subtract_many_rects(footprint_rects, [void_rect])):
-            add_box(col, f"Base_{int(z_offset*1000)}_{i}", patch.cx, patch.cy, z_offset - FLOOR_THICKNESS*0.5, patch.w, patch.h, FLOOR_THICKNESS, base_mat)
+            if MODULAR_TILES_ENABLED:
+                add_tiled_patch(col, f"Base_{int(z_offset*1000)}_{i}", patch.cx, patch.cy, z_offset - FLOOR_THICKNESS*0.5, patch.w, patch.h, FLOOR_THICKNESS, SURFACE_TILE_SIZE, SURFACE_TILE_SIZE, base_mat)
+            else:
+                add_box(col, f"Base_{int(z_offset*1000)}_{i}", patch.cx, patch.cy, z_offset - FLOOR_THICKNESS*0.5, patch.w, patch.h, FLOOR_THICKNESS, base_mat)
 
     for r in valid_rooms:
         room_mat = ensure_material(f"MAT_{r.key}", r.color)
         room_patches = subtract_many_rects([r.rect], [void_rect, open_void] if open_void else [void_rect])
         for i, patch in enumerate(room_patches):
-            add_box(col, f"FLR_{r.key}_{int(z_offset*1000)}_{i}", patch.cx, patch.cy, z_offset + FLOOR_THICKNESS*0.5, patch.w, patch.h, FLOOR_THICKNESS, room_mat)
+            if MODULAR_TILES_ENABLED:
+                add_tiled_patch(col, f"FLR_{r.key}_{int(z_offset*1000)}_{i}", patch.cx, patch.cy, z_offset + FLOOR_THICKNESS*0.5, patch.w, patch.h, FLOOR_THICKNESS, SURFACE_TILE_SIZE, SURFACE_TILE_SIZE, room_mat)
+            else:
+                add_box(col, f"FLR_{r.key}_{int(z_offset*1000)}_{i}", patch.cx, patch.cy, z_offset + FLOOR_THICKNESS*0.5, patch.w, patch.h, FLOOR_THICKNESS, room_mat)
         add_text(col, r.label, r.rect.x + 0.2, r.rect.cy, z_offset + 0.03)
 
     cor_patches = subtract_many_rects([corridor], [void_rect, open_void] if open_void else [void_rect])
     for i, patch in enumerate(cor_patches):
-        add_box(col, f"FLR_Corridor_{int(z_offset*1000)}_{i}", patch.cx, patch.cy, z_offset + FLOOR_THICKNESS*0.52, patch.w, patch.h, FLOOR_THICKNESS*1.02, cor_mat)
+        if MODULAR_TILES_ENABLED:
+            add_tiled_patch(col, f"FLR_Corridor_{int(z_offset*1000)}_{i}", patch.cx, patch.cy, z_offset + FLOOR_THICKNESS*0.52, patch.w, patch.h, FLOOR_THICKNESS*1.02, SURFACE_TILE_SIZE, SURFACE_TILE_SIZE, cor_mat)
+        else:
+            add_box(col, f"FLR_Corridor_{int(z_offset*1000)}_{i}", patch.cx, patch.cy, z_offset + FLOOR_THICKNESS*0.52, patch.w, patch.h, FLOOR_THICKNESS*1.02, cor_mat)
 
     if use_legacy_quad_shell:
         outer = [
@@ -2111,7 +2279,22 @@ def add_roof_patches(col, current_patches: List[Rect], z_offset: float, next_pat
         roof_targets = subtract_many_rects(roof_targets, [opening_rect])
 
     for patch_index, patch in enumerate(roof_targets):
-        add_box(col, f"Roof_{int(z_offset*1000)}_{patch_index}", patch.cx, patch.cy, roof_z, patch.w, patch.h, FLOOR_THICKNESS, roof_mat)
+        if MODULAR_TILES_ENABLED:
+            add_world_aligned_surface_tiles(
+                col,
+                f"Roof_{int(z_offset*1000)}_{patch_index}",
+                patch.cx,
+                patch.cy,
+                roof_z,
+                patch.w,
+                patch.h,
+                FLOOR_THICKNESS,
+                SURFACE_TILE_SIZE,
+                SURFACE_TILE_SIZE,
+                roof_mat,
+            )
+        else:
+            add_box(col, f"Roof_{int(z_offset*1000)}_{patch_index}", patch.cx, patch.cy, roof_z, patch.w, patch.h, FLOOR_THICKNESS, roof_mat)
 
 
 
@@ -2245,35 +2428,80 @@ def _assign_uv_to_bbox(obj, region, atlas_w, atlas_h):
     min_v = 1.0 - (region["y"] + region["h"]) / atlas_h
     max_v = 1.0 - region["y"] / atlas_h
 
-    xs = [v.co.x for v in mesh.vertices]
-    ys = [v.co.y for v in mesh.vertices]
-    zs = [v.co.z for v in mesh.vertices]
-    minx, maxx = min(xs), max(xs)
-    miny, maxy = min(ys), max(ys)
-    minz, maxz = min(zs), max(zs)
+    span_u = max(max_u - min_u, EPS)
+    span_v = max(max_v - min_v, EPS)
+    tile_w = max(float(region.get("tile_width_m", 1.0)), EPS)
+    tile_h = max(float(region.get("tile_height_m", 1.0)), EPS)
+    eps_uv = 1e-6
+    mw = obj.matrix_world
 
-    def remap(val, a, b, c, d):
-        if abs(b - a) < 1e-8:
-            return (c + d) * 0.5
-        t = (val - a) / (b - a)
-        return c + (d - c) * t
+    def repeat_with_face_hint(value: float, size: float, center: float) -> float:
+        """Repeat value inside one tile, but do not collapse exact tile boundaries.
+
+        When geometry is snapped to the same world grid as tile_width_m / tile_height_m
+        (for example 1x1 roof tiles on a 1-meter grid), raw modulo sends both sides
+        of the face to 0.0. That collapses the UVs into a line or a point.
+        We use the face center as a hint: an exact boundary on the "far" side of
+        the face becomes 1.0-eps, while the "near" side stays 0.0.
+        """
+        scaled = value / size
+        nearest = round(scaled)
+        if abs(scaled - nearest) <= 1e-6:
+            boundary = nearest * size
+            return 1.0 - eps_uv if value > center and abs(value - boundary) <= 1e-6 else 0.0
+        t = scaled % 1.0
+        if t >= 1.0 - eps_uv:
+            t = 1.0 - eps_uv
+        if t < 0.0:
+            t += 1.0
+        return t
+
+    def project_coords(world_v, use_xy: bool, use_xz: bool):
+        if use_xy:
+            return world_v.x, world_v.y
+        if use_xz:
+            return world_v.x, world_v.z
+        return world_v.y, world_v.z
 
     for poly in mesh.polygons:
-        n = poly.normal
+        n = (mw.to_3x3() @ poly.normal).normalized()
         use_xy = abs(n.z) > 0.7
         use_xz = abs(n.y) > 0.7
+
+        projected = []
+        loop_data = []
         for li in poly.loop_indices:
-            v = mesh.vertices[mesh.loops[li].vertex_index].co
-            if use_xy:
-                u = remap(v.x, minx, maxx, min_u, max_u)
-                vv = remap(v.y, miny, maxy, min_v, max_v)
-            elif use_xz:
-                u = remap(v.x, minx, maxx, min_u, max_u)
-                vv = remap(v.z, minz, maxz, min_v, max_v)
-            else:
-                u = remap(v.y, miny, maxy, min_u, max_u)
-                vv = remap(v.z, minz, maxz, min_v, max_v)
-            uv_layer[li].uv = (u, vv)
+            local_v = mesh.vertices[mesh.loops[li].vertex_index].co
+            world_v = mw @ local_v
+            px, py = project_coords(world_v, use_xy, use_xz)
+            projected.append((px, py))
+            loop_data.append((li, px, py))
+
+        face_min_x = min(p[0] for p in projected)
+        face_max_x = max(p[0] for p in projected)
+        face_min_y = min(p[1] for p in projected)
+        face_max_y = max(p[1] for p in projected)
+        face_center_x = (face_min_x + face_max_x) * 0.5
+        face_center_y = (face_min_y + face_max_y) * 0.5
+        face_span_x = max(face_max_x - face_min_x, EPS)
+        face_span_y = max(face_max_y - face_min_y, EPS)
+
+        # Small modular faces (like the 1x1 roof tiles) should always fill the whole
+        # atlas tile. This avoids the classic collapse when all vertices sit exactly
+        # on integer world coordinates.
+        if face_span_x <= tile_w + 1e-6 and face_span_y <= tile_h + 1e-6:
+            for li, px, py in loop_data:
+                fu = (px - face_min_x) / face_span_x if face_span_x > EPS else 0.0
+                fv = (py - face_min_y) / face_span_y if face_span_y > EPS else 0.0
+                fu = min(max(fu, 0.0), 1.0 - eps_uv)
+                fv = min(max(fv, 0.0), 1.0 - eps_uv)
+                uv_layer[li].uv = (min_u + fu * span_u, min_v + fv * span_v)
+            continue
+
+        for li, px, py in loop_data:
+            fu = repeat_with_face_hint(px, tile_w, face_center_x)
+            fv = repeat_with_face_hint(py, tile_h, face_center_y)
+            uv_layer[li].uv = (min_u + fu * span_u, min_v + fv * span_v)
 
 def apply_atlas_stage1(collection_name: str, seed_value: int):
     manifest = _load_json(ATLAS_MANIFEST_PATH)
@@ -2485,6 +2713,9 @@ _DEFAULTS = {
     "ATLAS_IMAGE_PATH": ATLAS_IMAGE_PATH,
     "ATLAS_INCLUDE_INTERIOR_WALLS": ATLAS_INCLUDE_INTERIOR_WALLS,
     "ATLAS_RANDOM_PICK": ATLAS_RANDOM_PICK,
+    "MODULAR_TILES_ENABLED": MODULAR_TILES_ENABLED,
+    "WALL_TILE_WIDTH": WALL_TILE_WIDTH,
+    "SURFACE_TILE_SIZE": SURFACE_TILE_SIZE,
 }
 
 
@@ -2504,12 +2735,15 @@ def apply_settings(settings: dict):
     global HOUSE_SCALE, TARGET_ROOM_COUNT, AUTO_RANDOM_SEED, SEED, MIN_FLOORS, MAX_FLOORS, FLOOR_TO_FLOOR_HEIGHT
     global BUILDING_MODE, SHAPE_MODE, STRICT_EDGE_TOL
     global ATLAS_ENABLED, ATLAS_MANIFEST_PATH, ATLAS_IMAGE_PATH, ATLAS_INCLUDE_INTERIOR_WALLS, ATLAS_RANDOM_PICK
+    global MODULAR_TILES_ENABLED, WALL_TILE_WIDTH, SURFACE_TILE_SIZE
 
     for key, value in settings.items():
         if key in globals():
             globals()[key] = value
 
     FLOOR_TO_FLOOR_HEIGHT = WALL_HEIGHT + FLOOR_THICKNESS
+    WALL_TILE_WIDTH = max(0.05, WALL_TILE_WIDTH)
+    SURFACE_TILE_SIZE = max(0.05, SURFACE_TILE_SIZE)
     STRICT_EDGE_TOL = max(WALL_THICKNESS * 0.75, 0.22)
 
 

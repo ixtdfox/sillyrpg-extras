@@ -16,6 +16,7 @@ SETTING_NAMES = [
     "residual_corridor_shared_bonus", "house_scale", "target_room_count", "auto_random_seed", "seed",
     "min_floors", "max_floors", "building_mode", "shape_mode", "atlas_enabled", "atlas_manifest_path",
     "atlas_image_path", "atlas_include_interior_walls", "atlas_random_pick",
+    "modular_tiles_enabled", "wall_tile_width", "surface_tile_size",
 ]
 
 KEY_MAP = {
@@ -73,6 +74,9 @@ KEY_MAP = {
     "atlas_image_path": "ATLAS_IMAGE_PATH",
     "atlas_include_interior_walls": "ATLAS_INCLUDE_INTERIOR_WALLS",
     "atlas_random_pick": "ATLAS_RANDOM_PICK",
+    "modular_tiles_enabled": "MODULAR_TILES_ENABLED",
+    "wall_tile_width": "WALL_TILE_WIDTH",
+    "surface_tile_size": "SURFACE_TILE_SIZE",
 }
 
 

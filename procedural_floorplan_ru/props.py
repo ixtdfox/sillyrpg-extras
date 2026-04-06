@@ -96,6 +96,9 @@ def apply_defaults_to_props(props):
     props.atlas_door_offset_y = 0.0
     props.atlas_door_width_scale = 1.0
     props.atlas_door_height_scale = 1.0
+    props.modular_tiles_enabled = DEFAULTS["MODULAR_TILES_ENABLED"]
+    props.wall_tile_width = DEFAULTS["WALL_TILE_WIDTH"]
+    props.surface_tile_size = DEFAULTS["SURFACE_TILE_SIZE"]
 
 
 class FloorplanSettings(bpy.types.PropertyGroup):
@@ -124,9 +127,9 @@ class FloorplanSettings(bpy.types.PropertyGroup):
 
     window_sill_height: FloatProperty(name="Высота подоконника", description="Высота нижней части окна от пола", default=DEFAULTS["WINDOW_SILL_HEIGHT"], min=0.0, soft_max=2.0)
     window_height: FloatProperty(name="Высота окна", description="Высота оконного проёма", default=DEFAULTS["WINDOW_HEIGHT"], min=0.2, soft_max=3.0)
-    window_min_width: FloatProperty(name="Мин. ширина окна", description="Минимально допустимая ширина окна", default=DEFAULTS["WINDOW_MIN_WIDTH"], min=0.2, soft_max=3.0)
+    window_min_width: FloatProperty(name="Мин. ширина окна", description="Минимально допустимая ширина окна", default=DEFAULTS["WINDOW_MIN_WIDTH"], min=1.0, soft_max=6.0, step=100, precision=0)
     window_end_margin: FloatProperty(name="Отступ окна от края", description="Минимальный отступ окна от края стены", default=DEFAULTS["WINDOW_END_MARGIN"], min=0.0, soft_max=2.0)
-    window_strip_width: FloatProperty(name="Ширина узкого окна", description="Ширина узких ленточных окон для сервисных помещений", default=DEFAULTS["WINDOW_STRIP_WIDTH"], min=0.2, soft_max=3.0)
+    window_strip_width: FloatProperty(name="Ширина узкого окна", description="Ширина узких ленточных окон для сервисных помещений", default=DEFAULTS["WINDOW_STRIP_WIDTH"], min=1.0, soft_max=6.0, step=100, precision=0)
 
     outer_margin: FloatProperty(name="Внешний отступ", description="Отступ комнат от внутренней грани внешней стены. Обычно 0 для плотного примыкания", default=DEFAULTS["OUTER_MARGIN"], min=0.0, soft_max=2.0)
     room_gap: FloatProperty(name="Зазор между комнатами", description="Дополнительный зазор между соседними комнатами", default=DEFAULTS["ROOM_GAP"], min=0.0, soft_max=1.0)
@@ -204,6 +207,10 @@ class FloorplanSettings(bpy.types.PropertyGroup):
     atlas_door_offset_y: FloatProperty(name="offset_y", description="Смещение текстуры двери по Y из placement.wall_doors.offset_y", default=0.0, soft_min=-5.0, soft_max=5.0)
     atlas_door_width_scale: FloatProperty(name="width_scale", description="Масштаб ширины дверной текстуры из placement.wall_doors.width_scale", default=1.0, min=0.001, soft_max=5.0)
     atlas_door_height_scale: FloatProperty(name="height_scale", description="Масштаб высоты дверной текстуры из placement.wall_doors.height_scale", default=1.0, min=0.001, soft_max=5.0)
+
+    modular_tiles_enabled: BoolProperty(name="Модульные 3D-тайлы", description="Собирать стены, полы и крыши из модульных тайлов вместо крупных кусков", default=DEFAULTS["MODULAR_TILES_ENABLED"])
+    wall_tile_width: FloatProperty(name="Шаг стены", description="Длина одного стенового тайла вдоль стены", default=DEFAULTS["WALL_TILE_WIDTH"], min=0.1, soft_max=2.0)
+    surface_tile_size: FloatProperty(name="Тайл пола/крыши", description="Размер тайла пола и крыши по X/Y", default=DEFAULTS["SURFACE_TILE_SIZE"], min=0.1, soft_max=2.0)
 
 
 classes = (FloorplanSettings,)
