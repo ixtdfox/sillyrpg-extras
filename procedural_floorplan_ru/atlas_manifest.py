@@ -7,7 +7,7 @@ from . import core
 
 ATLAS_CATEGORIES = [
     ("walls", "walls", "Обычные стены"),
-    ("wall_windows", "wall_windows", "Стены с окнами"),
+    ("glass", "glass", "Стекло"),
     ("wall_doors", "wall_doors", "Стены с дверями"),
     ("floors", "floors", "Полы"),
     ("roofs", "roofs", "Крыши"),
@@ -39,7 +39,7 @@ def save_manifest_to_props(props, manifest: dict):
 
 def _ensure_placement(manifest: dict):
     placement = manifest.setdefault("placement", {})
-    for key in ("wall_windows", "wall_doors"):
+    for key in ("glass", "wall_windows", "wall_doors"):
         cfg = placement.setdefault(key, {})
         cfg.setdefault("offset_x", 0.0)
         cfg.setdefault("offset_y", 0.0)
@@ -102,7 +102,7 @@ def sync_editor_from_manifest(props):
         props.atlas_tile_height_m = float(entry.get("tile_height_m", 1.0))
 
     placement = _ensure_placement(manifest)
-    ww = placement["wall_windows"]
+    ww = placement.get("glass") or placement.get("wall_windows") or {"offset_x": 0.0, "offset_y": 0.0, "width_scale": 1.0, "height_scale": 1.0}
     wd = placement["wall_doors"]
     props.atlas_window_offset_x = float(ww.get("offset_x", 0.0))
     props.atlas_window_offset_y = float(ww.get("offset_y", 0.0))
@@ -136,7 +136,7 @@ def apply_editor_to_manifest(props):
     entry["tile_height_m"] = float(props.atlas_tile_height_m)
 
     placement = _ensure_placement(manifest)
-    placement["wall_windows"] = {
+    placement["glass"] = {
         "offset_x": float(props.atlas_window_offset_x),
         "offset_y": float(props.atlas_window_offset_y),
         "width_scale": float(props.atlas_window_width_scale),

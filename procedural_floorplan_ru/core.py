@@ -162,6 +162,87 @@ def scale_floor_spec(spec: dict, target_width: float, target_depth: float) -> di
     return spec
 
 
+def ceil_to_meter(v: float) -> float:
+    return float(max(1, int(math.ceil(v - EPS))))
+
+
+def quantize_house_shell(width: float, depth: float) -> Tuple[float, float]:
+    # Keep the OUTER shell aligned to whole meters on X/Y.
+    # This makes roof tiling and facade/module coverage land on a stable 1x1 grid
+    # and avoids the recurring +X/+Y half-wall gaps.
+    return ceil_to_meter(width), ceil_to_meter(depth)
+
+
+def _build_meter_line_map(values: List[float], start: float, end: float) -> dict:
+    unique = sorted({round(v, 6) for v in values if start - EPS <= v <= end + EPS})
+    if len(unique) <= 2:
+        return {v: v for v in unique}
+
+    module_count = max(1, int(round(end - start)))
+    interior = unique[1:-1]
+    desired = []
+    for value in interior:
+        idx = int(round(value - start))
+        idx = max(1, min(module_count - 1, idx)) if module_count > 1 else 0
+        desired.append(idx)
+
+    assigned = desired[:] if desired else []
+    for i in range(1, len(assigned)):
+        assigned[i] = max(assigned[i], assigned[i - 1] + 1)
+    for i in range(len(assigned) - 2, -1, -1):
+        assigned[i] = min(assigned[i], assigned[i + 1] - 1)
+    if assigned:
+        min_allowed = 1
+        max_allowed = max(1, module_count - 1)
+        for i, idx in enumerate(assigned):
+            assigned[i] = max(min_allowed, min(max_allowed, idx))
+
+    mapping = {unique[0]: start, unique[-1]: end}
+    for value, idx in zip(interior, assigned):
+        mapping[value] = start + float(idx)
+    return mapping
+
+
+def quantize_layout_to_meter_grid(rooms: List["Room"], corridor: "Rect", stair=None, open_void: Optional["Rect"] = None):
+    inner_x0 = WALL_THICKNESS * 0.5
+    inner_y0 = WALL_THICKNESS * 0.5
+    inner_x1 = HOUSE_WIDTH - WALL_THICKNESS * 0.5
+    inner_y1 = HOUSE_DEPTH - WALL_THICKNESS * 0.5
+
+    x_values = [inner_x0, inner_x1, corridor.x, corridor.x2]
+    y_values = [inner_y0, inner_y1, corridor.y, corridor.y2]
+
+    rects = [r.rect for r in rooms if r.rect is not None]
+    if open_void is not None:
+        rects.append(open_void)
+    if stair is not None and getattr(stair, 'rect', None) is not None:
+        rects.append(stair.rect)
+    for rect in rects:
+        x_values.extend([rect.x, rect.x2])
+        y_values.extend([rect.y, rect.y2])
+
+    x_map = _build_meter_line_map(x_values, inner_x0, inner_x1)
+    y_map = _build_meter_line_map(y_values, inner_y0, inner_y1)
+
+    def remap(rect: Optional[Rect]) -> Optional[Rect]:
+        if rect is None:
+            return None
+        x1 = x_map.get(round(rect.x, 6), rect.x)
+        x2 = x_map.get(round(rect.x2, 6), rect.x2)
+        y1 = y_map.get(round(rect.y, 6), rect.y)
+        y2 = y_map.get(round(rect.y2, 6), rect.y2)
+        return Rect(x1, y1, max(EPS, x2 - x1), max(EPS, y2 - y1))
+
+    for room in rooms:
+        room.rect = remap(room.rect)
+    corridor = remap(corridor)
+    if stair is not None and getattr(stair, 'rect', None) is not None:
+        stair.rect = remap(stair.rect)
+    if open_void is not None:
+        open_void = remap(open_void)
+    return rooms, corridor, stair, open_void
+
+
 @dataclass
 class Room:
     key: str
@@ -327,6 +408,25 @@ def _snap_opening_to_module(seg_start: float, seg_end: float, opening: Opening, 
     return Opening(snapped_start, snapped_end, opening.z0, opening.z1)
 
 
+
+
+def normalize_openings_for_segment(openings: List[Opening], seg_start: float, seg_end: float) -> List[Opening]:
+    clean = []
+    for op in openings:
+        s = max(seg_start, op.start)
+        e = min(seg_end, op.end)
+        if e - s > EPS:
+            clean.append(Opening(s, e, op.z0, op.z1))
+    if MODULAR_TILES_ENABLED and clean:
+        unit = _modular_unit()
+        snapped = []
+        for op in clean:
+            sop = _snap_opening_to_module(seg_start, seg_end, op, unit)
+            if sop is not None:
+                snapped.append(sop)
+        clean = snapped
+    return prune_overlapping_openings(clean)
+
 def add_tiled_patch(col, name, x, y, z, sx, sy, sz, tile_x: float, tile_y: float, mat=None, keep_uniform: bool = False):
     x_parts = _split_length_into_tiles(sx, tile_x, keep_uniform=keep_uniform)
     y_parts = _split_length_into_tiles(sy, tile_y, keep_uniform=keep_uniform)
@@ -338,43 +438,6 @@ def add_tiled_patch(col, name, x, y, z, sx, sy, sz, tile_x: float, tile_y: float
         for iy, (off_y, part_y) in enumerate(y_parts):
             cy = base_y + off_y
             created.append(add_box(col, f"{name}_tile_{ix}_{iy}", cx, cy, z, part_x, part_y, sz, mat))
-    return created
-
-
-def add_world_aligned_surface_tiles(col, name, x, y, z, sx, sy, sz, tile_x: float, tile_y: float, mat=None):
-    """Create exact-size horizontal tiles snapped to the global meter grid.
-
-    This is mainly used for roofs so adjacent roof patches line up to the same
-    1x1 meter grid instead of producing remainder strips like 0.396 x 0.783.
-    Tiles may extend slightly beyond a patch boundary when the footprint is not
-    divisible by the tile size, but every created tile keeps the exact nominal size.
-    """
-    tile_x = max(EPS, float(tile_x))
-    tile_y = max(EPS, float(tile_y))
-    min_x = x - sx * 0.5
-    max_x = x + sx * 0.5
-    min_y = y - sy * 0.5
-    max_y = y + sy * 0.5
-
-    start_ix = math.floor(min_x / tile_x)
-    end_ix = math.ceil(max_x / tile_x)
-    start_iy = math.floor(min_y / tile_y)
-    end_iy = math.ceil(max_y / tile_y)
-
-    created = []
-    for ix in range(start_ix, end_ix):
-        cx = (ix + 0.5) * tile_x
-        cell_min_x = cx - tile_x * 0.5
-        cell_max_x = cx + tile_x * 0.5
-        if min(cell_max_x, max_x) - max(cell_min_x, min_x) <= EPS:
-            continue
-        for iy in range(start_iy, end_iy):
-            cy = (iy + 0.5) * tile_y
-            cell_min_y = cy - tile_y * 0.5
-            cell_max_y = cy + tile_y * 0.5
-            if min(cell_max_y, max_y) - max(cell_min_y, min_y) <= EPS:
-                continue
-            created.append(add_box(col, f"{name}_tile_{ix}_{iy}", cx, cy, z, tile_x, tile_y, sz, mat))
     return created
 
 
@@ -567,7 +630,7 @@ def estimate_footprint(rooms: List[Room]) -> Tuple[float, float]:
 
     width = usable_width + WALL_THICKNESS
     depth = usable_depth + WALL_THICKNESS
-    return width, depth
+    return quantize_house_shell(width, depth)
 
 
 def layout_floorplan_quad(rooms: List[Room]):
@@ -925,11 +988,41 @@ def add_entry_door_leaf(col, name, orientation, fixed, center, z0, width, height
     if orientation == "H":
         cx = center
         cy = fixed + (wall_thickness * 0.5 - ENTRY_DOOR_THICKNESS * 0.5 if fixed < HOUSE_DEPTH * 0.5 else -(wall_thickness * 0.5 - ENTRY_DOOR_THICKNESS * 0.5))
-        add_box(col, name, cx, cy, door_z, width, ENTRY_DOOR_THICKNESS, slab_h, mat)
+        obj = add_box(col, name, cx, cy, door_z, width, ENTRY_DOOR_THICKNESS, slab_h, mat)
     else:
         cx = fixed + (wall_thickness * 0.5 - ENTRY_DOOR_THICKNESS * 0.5 if fixed < HOUSE_WIDTH * 0.5 else -(wall_thickness * 0.5 - ENTRY_DOOR_THICKNESS * 0.5))
         cy = center
-        add_box(col, name, cx, cy, door_z, ENTRY_DOOR_THICKNESS, width, slab_h, mat)
+        obj = add_box(col, name, cx, cy, door_z, ENTRY_DOOR_THICKNESS, width, slab_h, mat)
+    obj["atlas_category"] = "wall_doors"
+    obj["generated_entry_door"] = True
+    return obj
+
+
+def add_window_glass(col, name, orientation, fixed, opening: Opening, z0: float, wall_thickness: float):
+    # Plug the opening with a thin insert positioned slightly toward the interior side
+    # of the exterior wall. The interior offset must depend on the wall side; otherwise
+    # west/south walls look correct while east/north walls appear shifted, or vice versa.
+    width = max(0.08, opening.end - opening.start + 0.06)
+    height = max(0.08, opening.z1 - opening.z0 + 0.06)
+    depth = max(0.03, min(0.08, wall_thickness * 0.35))
+    center = (opening.start + opening.end) * 0.5
+    center_z = z0 + (opening.z0 + opening.z1) * 0.5
+
+    inward = max(0.0, wall_thickness * 0.5 - depth * 0.5 - 0.002)
+    if orientation == "H":
+        # South wall (small fixed) offsets to +Y, north wall to -Y.
+        cy = fixed + (inward if fixed < HOUSE_DEPTH * 0.5 else -inward)
+        obj = add_box(col, name, center, cy, center_z, width, depth, height)
+    else:
+        # West wall (small fixed) offsets to +X, east wall to -X.
+        cx = fixed + (inward if fixed < HOUSE_WIDTH * 0.5 else -inward)
+        obj = add_box(col, name, cx, center, center_z, depth, width, height)
+
+    obj["atlas_category"] = "glass"
+    obj["atlas_tile_id"] = "glass_01"
+    obj["atlas_force_bbox"] = True
+    obj["generated_glass"] = True
+    return obj
 
 def shared_wall(a: Rect, b: Rect):
     if almost(a.x2, b.x):
@@ -1337,6 +1430,21 @@ def prune_overlapping_openings(openings: List[Opening]):
 
 
 
+
+
+def remove_openings_overlapping_blockers(openings: List[Opening], blockers: List[Opening]) -> List[Opening]:
+    if not openings or not blockers:
+        return list(openings)
+    out = []
+    for op in openings:
+        bad = False
+        for blk in blockers:
+            if overlap(op.start, op.end, blk.start, blk.end) and not (op.z1 <= blk.z0 + EPS or blk.z1 <= op.z0 + EPS):
+                bad = True
+                break
+        if not bad:
+            out.append(op)
+    return out
 def offset_openings(openings: List[Opening], z_offset: float) -> List[Opening]:
     if abs(z_offset) <= EPS:
         return list(openings)
@@ -2136,23 +2244,31 @@ def draw_geometry(col, rooms: List[Room], corridor: Rect, stair: Optional[StairP
             ("V", 0.0, 0.0, HOUSE_DEPTH),
             ("V", HOUSE_WIDTH, 0.0, HOUSE_DEPTH),
         ]
-        entrance_ops = {("H", 0.0): [Opening(HOUSE_WIDTH*0.5 - 0.6, HOUSE_WIDTH*0.5 + 0.6, 0.0, DOOR_HEIGHT)]} if include_entrance else {}
+        entrance_ops = {("H", 0.0): [Opening(HOUSE_WIDTH*0.5 - ENTRY_DOOR_WIDTH*0.5, HOUSE_WIDTH*0.5 + ENTRY_DOOR_WIDTH*0.5, 0.0, DOOR_HEIGHT)]} if include_entrance else {}
         for i, (ori, fixed, start, end) in enumerate(outer):
-            ops = list(entrance_ops.get((ori, fixed), []))
+            raw_entrance_ops = list(entrance_ops.get((ori, fixed), []))
+            entrance_only_ops = normalize_openings_for_segment(raw_entrance_ops, start, end)
+            raw_glass_ops = []
             for room in rooms:
-                ops.extend(outer_window_openings_for_room(room, ori, fixed, start, end))
-            ops = prune_overlapping_openings(ops)
+                room_ops = outer_window_openings_for_room(room, ori, fixed, start, end)
+                raw_glass_ops.extend(room_ops)
+            glass_ops = normalize_openings_for_segment(raw_glass_ops, start, end)
+            glass_ops = remove_openings_overlapping_blockers(glass_ops, entrance_only_ops)
+            ops = prune_overlapping_openings(entrance_only_ops + glass_ops)
             ops = offset_openings(ops, z_offset)
             add_wall_with_openings(col, f"OW_{i}_{int(z_offset*1000)}", ori, fixed, start, end, z_offset, WALL_HEIGHT, WALL_THICKNESS, ops, wall_mat)
-            if include_entrance and ori == "H" and almost(fixed, 0.0):
+            for gidx, glass_op in enumerate(glass_ops):
+                add_window_glass(col, f"GLZ_{i}_{gidx}_{int(z_offset*1000)}", ori, fixed, glass_op, z_offset, WALL_THICKNESS)
+            if include_entrance and ori == "H" and almost(fixed, 0.0) and entrance_only_ops:
+                door_op = entrance_only_ops[0]
                 add_entry_door_leaf(
                     col,
                     f"EntryDoor_{i}_{int(z_offset*1000)}",
                     ori,
                     fixed,
-                    HOUSE_WIDTH * 0.5,
+                    (door_op.start + door_op.end) * 0.5,
                     z_offset,
-                    ENTRY_DOOR_WIDTH,
+                    door_op.end - door_op.start,
                     DOOR_HEIGHT - 0.02,
                     WALL_THICKNESS,
                     entry_door_mat,
@@ -2166,7 +2282,7 @@ def draw_geometry(col, rooms: List[Room], corridor: Rect, stair: Optional[StairP
         entrance_seg = choose_entrance_segment(boundary_segments) if include_entrance else None
 
         for i, seg in enumerate(boundary_segments):
-            ops = []
+            entrance_only_ops = []
             seg_name_prefix = "OW"
             is_entrance_segment = entrance_seg is seg
             if is_entrance_segment:
@@ -2175,28 +2291,31 @@ def draw_geometry(col, rooms: List[Room], corridor: Rect, stair: Optional[StairP
                 target_half = ENTRY_DOOR_WIDTH * 0.5
                 safe_half = max(0.20, (seg_len - 0.30) * 0.5)
                 half = min(target_half, safe_half)
-                ops.append(Opening(mid - half, mid + half, 0.0, DOOR_HEIGHT))
-                seg["_entry_mid"] = mid
-                seg["_entry_half"] = half
+                raw_entrance_ops = [Opening(mid - half, mid + half, 0.0, DOOR_HEIGHT)]
+                entrance_only_ops = normalize_openings_for_segment(raw_entrance_ops, seg["start"], seg["end"])
                 seg_name_prefix = "OW"
             window_ops = []
-            if seg["kind"] == "room" and seg["room"] is not None:
-                window_ops = boundary_window_openings_for_room(seg["room"], seg["ori"], seg["start"], seg["end"])
-                ops.extend(window_ops)
-                if window_ops and not is_entrance_segment:
+            if seg["kind"] == "room" and seg["room"] is not None and not is_entrance_segment:
+                raw_window_ops = boundary_window_openings_for_room(seg["room"], seg["ori"], seg["start"], seg["end"])
+                window_ops = normalize_openings_for_segment(raw_window_ops, seg["start"], seg["end"])
+                if window_ops:
                     seg_name_prefix = "OWW"
-            ops = prune_overlapping_openings(ops)
+            window_ops = remove_openings_overlapping_blockers(window_ops, entrance_only_ops)
+            ops = prune_overlapping_openings(entrance_only_ops + window_ops)
             ops = offset_openings(ops, z_offset)
             add_wall_with_openings(col, f"{seg_name_prefix}_{i}_{int(z_offset*1000)}", seg["ori"], seg["fixed"], seg["start"], seg["end"], z_offset, WALL_HEIGHT, WALL_THICKNESS, ops, wall_mat)
-            if is_entrance_segment and "_entry_mid" in seg and "_entry_half" in seg:
+            for gidx, glass_op in enumerate(window_ops):
+                add_window_glass(col, f"GLZ_{i}_{gidx}_{int(z_offset*1000)}", seg["ori"], seg["fixed"], glass_op, z_offset, WALL_THICKNESS)
+            if is_entrance_segment and entrance_only_ops:
+                door_op = entrance_only_ops[0]
                 add_entry_door_leaf(
                     col,
                     f"EntryDoor_{i}_{int(z_offset*1000)}",
                     seg["ori"],
                     seg["fixed"],
-                    seg["_entry_mid"],
+                    (door_op.start + door_op.end) * 0.5,
                     z_offset,
-                    seg["_entry_half"] * 2.0,
+                    door_op.end - door_op.start,
                     DOOR_HEIGHT - 0.02,
                     WALL_THICKNESS,
                     entry_door_mat,
@@ -2267,6 +2386,39 @@ def draw_geometry(col, rooms: List[Room], corridor: Rect, stair: Optional[StairP
                     add_wall_with_openings(col, f"SW_{idx}_{eidx}_{seg_idx}_{int(z_offset*1000)}", ori, fixed, seg_start, seg_end, z_offset, WALL_HEIGHT, WALL_THICKNESS*0.88, seg_openings, wall_mat)
 
 
+def _outerize_roof_patch(patch: Rect) -> Rect:
+    inner_x0 = WALL_THICKNESS * 0.5
+    inner_y0 = WALL_THICKNESS * 0.5
+    inner_x1 = HOUSE_WIDTH - WALL_THICKNESS * 0.5
+    inner_y1 = HOUSE_DEPTH - WALL_THICKNESS * 0.5
+    x0, y0, x1, y1 = patch.x, patch.y, patch.x2, patch.y2
+    if abs(x0 - inner_x0) <= max(STRICT_EDGE_TOL, 0.25):
+        x0 = 0.0
+    if abs(y0 - inner_y0) <= max(STRICT_EDGE_TOL, 0.25):
+        y0 = 0.0
+    if abs(x1 - inner_x1) <= max(STRICT_EDGE_TOL, 0.25):
+        x1 = HOUSE_WIDTH
+    if abs(y1 - inner_y1) <= max(STRICT_EDGE_TOL, 0.25):
+        y1 = HOUSE_DEPTH
+    return Rect(x0, y0, max(EPS, x1 - x0), max(EPS, y1 - y0))
+
+
+def add_roof_tiles_world_aligned(col, name_prefix: str, patch: Rect, z: float, thickness: float, tile_size: float, mat=None):
+    tile_size = max(EPS, tile_size)
+    patch = _outerize_roof_patch(patch)
+    start_x = int(math.floor(patch.x + EPS))
+    end_x = int(math.ceil(patch.x2 - EPS))
+    start_y = int(math.floor(patch.y + EPS))
+    end_y = int(math.ceil(patch.y2 - EPS))
+    created = []
+    idx = 0
+    for gx in range(start_x, end_x):
+        for gy in range(start_y, end_y):
+            created.append(add_box(col, f"{name_prefix}_tile_{idx}", gx + tile_size * 0.5, gy + tile_size * 0.5, z, tile_size, tile_size, thickness, mat))
+            idx += 1
+    return created
+
+
 def add_roof_patches(col, current_patches: List[Rect], z_offset: float, next_patches: Optional[List[Rect]] = None, opening_rect: Optional[Rect] = None, open_void: Optional[Rect] = None):
     roof_mat = ensure_material("FP_Roof", (0.72, 0.72, 0.74, 1.0))
     roof_z = z_offset + WALL_HEIGHT + FLOOR_THICKNESS * 0.5
@@ -2280,19 +2432,7 @@ def add_roof_patches(col, current_patches: List[Rect], z_offset: float, next_pat
 
     for patch_index, patch in enumerate(roof_targets):
         if MODULAR_TILES_ENABLED:
-            add_world_aligned_surface_tiles(
-                col,
-                f"Roof_{int(z_offset*1000)}_{patch_index}",
-                patch.cx,
-                patch.cy,
-                roof_z,
-                patch.w,
-                patch.h,
-                FLOOR_THICKNESS,
-                SURFACE_TILE_SIZE,
-                SURFACE_TILE_SIZE,
-                roof_mat,
-            )
+            add_roof_tiles_world_aligned(col, f"Roof_{int(z_offset*1000)}_{patch_index}", patch, roof_z, FLOOR_THICKNESS, SURFACE_TILE_SIZE, roof_mat)
         else:
             add_box(col, f"Roof_{int(z_offset*1000)}_{patch_index}", patch.cx, patch.cy, roof_z, patch.w, patch.h, FLOOR_THICKNESS, roof_mat)
 
@@ -2342,10 +2482,8 @@ def _write_default_atlas_manifest(path_str: str):
             {"id": "wall_03", "x": 512, "y": 0, "w": 256, "h": 256, "tile_width_m": 1.0, "tile_height_m": 3.0},
             {"id": "wall_04", "x": 768, "y": 0, "w": 256, "h": 256, "tile_width_m": 1.0, "tile_height_m": 3.0}
         ],
-        "wall_windows": [
-            {"id": "wall_window_01", "x": 0, "y": 256, "w": 256, "h": 256, "tile_width_m": 1.0, "tile_height_m": 3.0},
-            {"id": "wall_window_02", "x": 256, "y": 256, "w": 256, "h": 256, "tile_width_m": 1.0, "tile_height_m": 3.0},
-            {"id": "wall_window_03", "x": 512, "y": 256, "w": 512, "h": 256, "tile_width_m": 2.0, "tile_height_m": 3.0}
+        "glass": [
+            {"id": "glass_01", "x": 512, "y": 256, "w": 512, "h": 256, "tile_width_m": 2.0, "tile_height_m": 3.0}
         ],
         "wall_doors": [
             {"id": "wall_door_01", "x": 0, "y": 512, "w": 256, "h": 256, "tile_width_m": 1.0, "tile_height_m": 3.0},
@@ -2428,80 +2566,35 @@ def _assign_uv_to_bbox(obj, region, atlas_w, atlas_h):
     min_v = 1.0 - (region["y"] + region["h"]) / atlas_h
     max_v = 1.0 - region["y"] / atlas_h
 
-    span_u = max(max_u - min_u, EPS)
-    span_v = max(max_v - min_v, EPS)
-    tile_w = max(float(region.get("tile_width_m", 1.0)), EPS)
-    tile_h = max(float(region.get("tile_height_m", 1.0)), EPS)
-    eps_uv = 1e-6
-    mw = obj.matrix_world
+    xs = [v.co.x for v in mesh.vertices]
+    ys = [v.co.y for v in mesh.vertices]
+    zs = [v.co.z for v in mesh.vertices]
+    minx, maxx = min(xs), max(xs)
+    miny, maxy = min(ys), max(ys)
+    minz, maxz = min(zs), max(zs)
 
-    def repeat_with_face_hint(value: float, size: float, center: float) -> float:
-        """Repeat value inside one tile, but do not collapse exact tile boundaries.
-
-        When geometry is snapped to the same world grid as tile_width_m / tile_height_m
-        (for example 1x1 roof tiles on a 1-meter grid), raw modulo sends both sides
-        of the face to 0.0. That collapses the UVs into a line or a point.
-        We use the face center as a hint: an exact boundary on the "far" side of
-        the face becomes 1.0-eps, while the "near" side stays 0.0.
-        """
-        scaled = value / size
-        nearest = round(scaled)
-        if abs(scaled - nearest) <= 1e-6:
-            boundary = nearest * size
-            return 1.0 - eps_uv if value > center and abs(value - boundary) <= 1e-6 else 0.0
-        t = scaled % 1.0
-        if t >= 1.0 - eps_uv:
-            t = 1.0 - eps_uv
-        if t < 0.0:
-            t += 1.0
-        return t
-
-    def project_coords(world_v, use_xy: bool, use_xz: bool):
-        if use_xy:
-            return world_v.x, world_v.y
-        if use_xz:
-            return world_v.x, world_v.z
-        return world_v.y, world_v.z
+    def remap(val, a, b, c, d):
+        if abs(b - a) < 1e-8:
+            return (c + d) * 0.5
+        t = (val - a) / (b - a)
+        return c + (d - c) * t
 
     for poly in mesh.polygons:
-        n = (mw.to_3x3() @ poly.normal).normalized()
+        n = poly.normal
         use_xy = abs(n.z) > 0.7
         use_xz = abs(n.y) > 0.7
-
-        projected = []
-        loop_data = []
         for li in poly.loop_indices:
-            local_v = mesh.vertices[mesh.loops[li].vertex_index].co
-            world_v = mw @ local_v
-            px, py = project_coords(world_v, use_xy, use_xz)
-            projected.append((px, py))
-            loop_data.append((li, px, py))
-
-        face_min_x = min(p[0] for p in projected)
-        face_max_x = max(p[0] for p in projected)
-        face_min_y = min(p[1] for p in projected)
-        face_max_y = max(p[1] for p in projected)
-        face_center_x = (face_min_x + face_max_x) * 0.5
-        face_center_y = (face_min_y + face_max_y) * 0.5
-        face_span_x = max(face_max_x - face_min_x, EPS)
-        face_span_y = max(face_max_y - face_min_y, EPS)
-
-        # Small modular faces (like the 1x1 roof tiles) should always fill the whole
-        # atlas tile. This avoids the classic collapse when all vertices sit exactly
-        # on integer world coordinates.
-        if face_span_x <= tile_w + 1e-6 and face_span_y <= tile_h + 1e-6:
-            for li, px, py in loop_data:
-                fu = (px - face_min_x) / face_span_x if face_span_x > EPS else 0.0
-                fv = (py - face_min_y) / face_span_y if face_span_y > EPS else 0.0
-                fu = min(max(fu, 0.0), 1.0 - eps_uv)
-                fv = min(max(fv, 0.0), 1.0 - eps_uv)
-                uv_layer[li].uv = (min_u + fu * span_u, min_v + fv * span_v)
-            continue
-
-        for li, px, py in loop_data:
-            fu = repeat_with_face_hint(px, tile_w, face_center_x)
-            fv = repeat_with_face_hint(py, tile_h, face_center_y)
-            uv_layer[li].uv = (min_u + fu * span_u, min_v + fv * span_v)
+            v = mesh.vertices[mesh.loops[li].vertex_index].co
+            if use_xy:
+                u = remap(v.x, minx, maxx, min_u, max_u)
+                vv = remap(v.y, miny, maxy, min_v, max_v)
+            elif use_xz:
+                u = remap(v.x, minx, maxx, min_u, max_u)
+                vv = remap(v.z, minz, maxz, min_v, max_v)
+            else:
+                u = remap(v.y, miny, maxy, min_u, max_u)
+                vv = remap(v.z, minz, maxz, min_v, max_v)
+            uv_layer[li].uv = (u, vv)
 
 def apply_atlas_stage1(collection_name: str, seed_value: int):
     manifest = _load_json(ATLAS_MANIFEST_PATH)
@@ -2519,6 +2612,7 @@ def apply_atlas_stage1(collection_name: str, seed_value: int):
 
     cats = {
         "walls": manifest.get("walls", []),
+        "glass": manifest.get("glass", manifest.get("wall_windows", [])),
         "wall_windows": manifest.get("wall_windows", []),
         "wall_doors": manifest.get("wall_doors", []),
         "floors": manifest.get("floors", []),
@@ -2543,6 +2637,10 @@ def apply_atlas_stage1(collection_name: str, seed_value: int):
             continue
         name = obj.name
         category = None
+
+        # Generated window glass uses a dedicated glass atlas category.
+        if name.startswith("GLZ_") or obj.get("generated_glass"):
+            category = "glass"
         if name.startswith("Roof_"):
             category = "roofs"
         elif name.startswith("FLR_") or name.startswith("Base_"):
@@ -2551,10 +2649,10 @@ def apply_atlas_stage1(collection_name: str, seed_value: int):
             category = "stairs"
         elif name.startswith("StairLanding") or name.startswith("StairTopPlatform"):
             category = "stair_landings"
-        elif name.startswith("OWD_"):
+        elif name.startswith("OWD_") or name.startswith("EntryDoor_") or obj.get("generated_entry_door"):
             category = "wall_doors"
         elif name.startswith("OWW_"):
-            category = "wall_windows"
+            category = "walls"
         elif name.startswith("OW_"):
             category = "walls"
         elif ATLAS_INCLUDE_INTERIOR_WALLS and (name.startswith("IW_") or name.startswith("SW_")):
@@ -2563,7 +2661,20 @@ def apply_atlas_stage1(collection_name: str, seed_value: int):
         if not category:
             continue
 
-        region = _atlas_pick(cats.get(category, []), seed_value, f"{name}:{category}")
+        override_category = obj.get("atlas_category")
+        override_tile_id = obj.get("atlas_tile_id")
+        if override_category:
+            category = str(override_category)
+        regions = cats.get(category, [])
+        region = None
+        if override_tile_id:
+            override_tile_id = str(override_tile_id)
+            for entry in regions:
+                if entry.get("id") == override_tile_id:
+                    region = entry
+                    break
+        if region is None:
+            region = _atlas_pick(regions, seed_value, f"{name}:{category}")
         if not region:
             continue
         obj.data.materials.clear()
@@ -2604,6 +2715,7 @@ def generate():
         rooms = valid_rooms
 
         stair = choose_stair_placement(rooms, corridor) if floor_index < floors - 1 else None
+        rooms, corridor, stair, open_void = quantize_layout_to_meter_grid(rooms, corridor, stair=stair, open_void=open_void)
 
         spec = {
             "rooms": rooms,

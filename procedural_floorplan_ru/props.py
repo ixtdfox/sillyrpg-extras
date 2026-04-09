@@ -198,10 +198,10 @@ class FloorplanSettings(bpy.types.PropertyGroup):
     atlas_tile_width_m: FloatProperty(name="tile_width_m", description="Ширина тайла в метрах", min=0.001, default=1.0)
     atlas_tile_height_m: FloatProperty(name="tile_height_m", description="Высота тайла в метрах", min=0.001, default=1.0)
 
-    atlas_window_offset_x: FloatProperty(name="offset_x", description="Смещение текстуры окна по X из placement.wall_windows.offset_x", default=0.0, soft_min=-5.0, soft_max=5.0)
-    atlas_window_offset_y: FloatProperty(name="offset_y", description="Смещение текстуры окна по Y из placement.wall_windows.offset_y", default=0.0, soft_min=-5.0, soft_max=5.0)
-    atlas_window_width_scale: FloatProperty(name="width_scale", description="Масштаб ширины оконной текстуры из placement.wall_windows.width_scale", default=1.0, min=0.001, soft_max=5.0)
-    atlas_window_height_scale: FloatProperty(name="height_scale", description="Масштаб высоты оконной текстуры из placement.wall_windows.height_scale", default=1.0, min=0.001, soft_max=5.0)
+    atlas_window_offset_x: FloatProperty(name="offset_x", description="Смещение текстуры окна по X из placement.glass.offset_x", default=0.0, soft_min=-5.0, soft_max=5.0)
+    atlas_window_offset_y: FloatProperty(name="offset_y", description="Смещение текстуры окна по Y из placement.glass.offset_y", default=0.0, soft_min=-5.0, soft_max=5.0)
+    atlas_window_width_scale: FloatProperty(name="width_scale", description="Масштаб ширины оконной текстуры из placement.glass.width_scale", default=1.0, min=0.001, soft_max=5.0)
+    atlas_window_height_scale: FloatProperty(name="height_scale", description="Масштаб высоты оконной текстуры из placement.glass.height_scale", default=1.0, min=0.001, soft_max=5.0)
 
     atlas_door_offset_x: FloatProperty(name="offset_x", description="Смещение текстуры двери по X из placement.wall_doors.offset_x", default=0.0, soft_min=-5.0, soft_max=5.0)
     atlas_door_offset_y: FloatProperty(name="offset_y", description="Смещение текстуры двери по Y из placement.wall_doors.offset_y", default=0.0, soft_min=-5.0, soft_max=5.0)
