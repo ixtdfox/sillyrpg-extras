@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
+from mathutils import Vector, Euler
 
 # ============================================================
 # Procedural floor plan for Blender 4.0
@@ -332,14 +333,19 @@ def add_box(col, name, x, y, z, sx, sy, sz, mat=None):
     obj = bpy.context.active_object
     obj.name = name
     obj.scale = (sx * 0.5, sy * 0.5, sz * 0.5)
+
     for c in list(obj.users_collection):
         c.objects.unlink(obj)
-    link_obj(obj, col)
+
+    if col is not None:
+        link_obj(obj, col)
+
     if mat:
         if obj.data.materials:
             obj.data.materials[0] = mat
         else:
             obj.data.materials.append(mat)
+
     return obj
 
 
@@ -2450,6 +2456,19 @@ ATLAS_IMAGE_PATH = ""   # if empty, taken from manifest meta.source_image
 ATLAS_INCLUDE_INTERIOR_WALLS = False
 ATLAS_RANDOM_PICK = True
 
+DECALS_ENABLED = False
+DECAL_MANIFEST_PATH = "//decal_atlas_v2.json"
+DECAL_IMAGE_PATH = ""   # if empty, taken from decal manifest meta.source_image
+DECAL_DENSITY = 0.35
+DECAL_ENABLE_STREAKS = True
+DECAL_ENABLE_GRIME = True
+DECAL_ENABLE_GROUND_STRIPS = True
+DECAL_ENABLE_CRACKS = True
+DECAL_ENABLE_CORNER_DIRT = True
+DECAL_ENABLE_EDGE_DIRT = True
+DEBUG_LOG_ENABLED = False
+DEBUG_TEXT_NAME = "FloorPlan_Debug_Log"
+
 def _atlas_abs(path_str: str) -> str:
     if not path_str:
         return ""
@@ -2554,7 +2573,7 @@ def _ensure_atlas_material(mat_name: str, image):
     mat.blend_method = 'CLIP'
     return mat
 
-def _assign_uv_to_bbox(obj, region, atlas_w, atlas_h):
+def _assign_uv_to_bbox(obj, region, atlas_w, atlas_h, rotate_cw_90=False):
     mesh = obj.data
     if not mesh.uv_layers:
         mesh.uv_layers.new(name="AtlasUV")
@@ -2583,8 +2602,10 @@ def _assign_uv_to_bbox(obj, region, atlas_w, atlas_h):
         n = poly.normal
         use_xy = abs(n.z) > 0.7
         use_xz = abs(n.y) > 0.7
+
         for li in poly.loop_indices:
             v = mesh.vertices[mesh.loops[li].vertex_index].co
+
             if use_xy:
                 u = remap(v.x, minx, maxx, min_u, max_u)
                 vv = remap(v.y, miny, maxy, min_v, max_v)
@@ -2594,6 +2615,17 @@ def _assign_uv_to_bbox(obj, region, atlas_w, atlas_h):
             else:
                 u = remap(v.y, miny, maxy, min_u, max_u)
                 vv = remap(v.z, minz, maxz, min_v, max_v)
+
+            if rotate_cw_90:
+                local_u = 0.5 if abs(max_u - min_u) < 1e-8 else (u - min_u) / (max_u - min_u)
+                local_v = 0.5 if abs(max_v - min_v) < 1e-8 else (vv - min_v) / (max_v - min_v)
+
+                rot_u = local_v
+                rot_v = 1.0 - local_u
+
+                u = min_u + (max_u - min_u) * rot_u
+                vv = min_v + (max_v - min_v) * rot_v
+
             uv_layer[li].uv = (u, vv)
 
 def apply_atlas_stage1(collection_name: str, seed_value: int):
@@ -2683,6 +2715,249 @@ def apply_atlas_stage1(collection_name: str, seed_value: int):
 
     print("[Atlas] Stage 1 materials assigned.")
 
+
+
+def _debug_text_block():
+    text = bpy.data.texts.get(DEBUG_TEXT_NAME)
+    if text is None:
+        text = bpy.data.texts.new(DEBUG_TEXT_NAME)
+    return text
+
+
+def _debug_reset():
+    if not DEBUG_LOG_ENABLED:
+        return
+    _debug_text_block().clear()
+
+
+def _debug_log(message: str):
+    if not DEBUG_LOG_ENABLED:
+        return
+    line = f"[FloorPlan] {message}"
+    print(line)
+    _debug_text_block().write(line + "\n")
+
+
+def _resolve_decal_walls(col):
+    walls = []
+    for obj in col.objects:
+        if obj.type != 'MESH':
+            continue
+        if obj.get('is_decal') or obj.get('generated_glass') or obj.get('generated_entry_door'):
+            continue
+        if obj.name.startswith(('OW_', 'OWW_', 'SEG_')):
+            walls.append(obj)
+    return walls
+
+
+def _ensure_decal_collection(parent_name: str):
+    name = f"{parent_name}_DECALS"
+    root = bpy.context.scene.collection
+    col = bpy.data.collections.get(name)
+    if col is None:
+        col = bpy.data.collections.new(name)
+        root.children.link(col)
+    return col
+
+
+def _ensure_decal_material(mat_name: str, image):
+    mat = bpy.data.materials.get(mat_name)
+    if mat is None:
+        mat = bpy.data.materials.new(mat_name)
+    mat.use_nodes = True
+    nt = mat.node_tree
+    for node in list(nt.nodes):
+        nt.nodes.remove(node)
+
+    out = nt.nodes.new(type="ShaderNodeOutputMaterial")
+    out.location = (760, 0)
+
+    mix = nt.nodes.new(type="ShaderNodeMixShader")
+    mix.location = (520, 0)
+
+    transparent = nt.nodes.new(type="ShaderNodeBsdfTransparent")
+    transparent.location = (260, 120)
+
+    bsdf = nt.nodes.new(type="ShaderNodeBsdfPrincipled")
+    bsdf.location = (260, -40)
+    bsdf.inputs['Roughness'].default_value = 0.95
+    bsdf.inputs['Metallic'].default_value = 0.0
+
+    tex = nt.nodes.new(type="ShaderNodeTexImage")
+    tex.location = (-520, 40)
+    tex.image = image
+
+    nt.links.new(tex.outputs['Color'], bsdf.inputs['Base Color'])
+    nt.links.new(tex.outputs['Alpha'], mix.inputs['Fac'])
+    nt.links.new(transparent.outputs['BSDF'], mix.inputs[1])
+    nt.links.new(bsdf.outputs['BSDF'], mix.inputs[2])
+    nt.links.new(mix.outputs['Shader'], out.inputs['Surface'])
+
+    mat.blend_method = 'BLEND'
+    mat.shadow_method = 'NONE'
+    mat.use_backface_culling = False
+    mat.show_transparent_back = True
+    return mat
+
+def _collection_bbox_and_center(col):
+    xs=[]; ys=[]; zs=[]
+    for obj in col.objects:
+        if obj.type != 'MESH':
+            continue
+        for c in obj.bound_box:
+            wc = obj.matrix_world @ Vector(c)
+            xs.append(wc.x); ys.append(wc.y); zs.append(wc.z)
+    if not xs:
+        return None, Vector((0.0,0.0,0.0))
+    mn = Vector((min(xs), min(ys), min(zs)))
+    mx = Vector((max(xs), max(ys), max(zs)))
+    return (mn, mx), (mn + mx) * 0.5
+
+
+def _pick_decal_category(manifest, rng):
+    cats = []
+    if DECAL_ENABLE_STREAKS and manifest.get('streaks'):
+        cats.append('streaks')
+    if DECAL_ENABLE_GRIME and manifest.get('grime'):
+        cats.append('grime')
+    if DECAL_ENABLE_CRACKS and manifest.get('cracks'):
+        cats.append('cracks')
+    if DECAL_ENABLE_CORNER_DIRT and manifest.get('corner_dirt'):
+        cats.append('corner_dirt')
+    if DECAL_ENABLE_EDGE_DIRT and manifest.get('edge_dirt'):
+        cats.append('edge_dirt')
+    return rng.choice(cats) if cats else None
+
+
+def _create_wall_decal_plane(target_col, wall_obj, region, atlas_w, atlas_h, image, category, seed_tag, center):
+    dims = wall_obj.dimensions
+    eps = 0.03
+    rng = random.Random(abs(hash(seed_tag)))
+    thin_x = dims.x <= dims.y
+    loc = wall_obj.location.copy()
+    rot = Euler((0.0, 0.0, 0.0), 'XYZ')
+    width = max(dims.y if thin_x else dims.x, 0.2)
+    height = max(dims.z, 0.2)
+    if category == 'ground_strips':
+        height = min(height * 0.35, max(0.4, region.get('tile_height_m', 1.0)))
+        z_center = wall_obj.location.z - dims.z * 0.5 + height * 0.5 + 0.01
+    else:
+        target_h = min(height * rng.uniform(0.28, 0.65), max(0.5, region.get('tile_height_m', 1.0)))
+        height = target_h
+        z_min = wall_obj.location.z - dims.z * 0.5 + height * 0.5 + 0.05
+        z_max = wall_obj.location.z + dims.z * 0.5 - height * 0.5 - 0.05
+        z_center = (z_min + z_max) * 0.5 if z_max <= z_min else rng.uniform(z_min, z_max)
+    width = min(width * rng.uniform(0.35, 0.95), max(0.3, region.get('tile_width_m', width)))
+    lateral = 0.0
+    max_lateral = max((dims.y if thin_x else dims.x) - width, 0.0) * 0.5
+    if max_lateral > 0.01:
+        lateral = rng.uniform(-max_lateral, max_lateral)
+
+    if thin_x:
+        sign = -1.0 if wall_obj.location.x < center.x else 1.0
+        loc.x += sign * (dims.x * 0.5 + eps)
+        loc.y += lateral
+        loc.z = z_center
+        rot.rotate_axis('Y', math.radians(90.0))
+    else:
+        sign = -1.0 if wall_obj.location.y < center.y else 1.0
+        loc.y += sign * (dims.y * 0.5 + eps)
+        loc.x += lateral
+        loc.z = z_center
+        rot.rotate_axis('X', math.radians(90.0))
+
+    bpy.ops.mesh.primitive_plane_add(location=loc, rotation=rot)
+    obj = bpy.context.active_object
+    obj.name = f"DECAL_{category}_{wall_obj.name}_{abs(hash(seed_tag)) % 99999}"
+    obj.scale = (max(0.08, width * 0.5), max(0.08, height * 0.5), 1.0)
+    obj.show_in_front = True
+    for c in list(obj.users_collection):
+        c.objects.unlink(obj)
+    link_obj(obj, target_col)
+    obj["atlas_category"] = category
+    obj["is_decal"] = True
+    obj["decal_target"] = wall_obj.name
+    obj.data.materials.clear()
+    obj.data.materials.append(_ensure_decal_material(f"Decal_{category}", image))
+    _assign_uv_to_bbox(obj, region, atlas_w, atlas_h, rotate_cw_90=True)
+    return obj
+
+
+def apply_decals_stage1(collection_name: str, seed_value: int):
+    _debug_reset()
+    _debug_log(f"Decal pipeline start: collection={collection_name}, seed={seed_value}")
+    manifest = _load_json(DECAL_MANIFEST_PATH)
+    if manifest is None:
+        _debug_log(f"Decal manifest not found: {DECAL_MANIFEST_PATH}")
+        print('[Decal] Manifest not found, skipping decals.')
+        return
+    meta = manifest.get('meta', {})
+    atlas_w = meta.get('atlas_width', 1024)
+    atlas_h = meta.get('atlas_height', 1024)
+    img_path = DECAL_IMAGE_PATH or meta.get('source_image', '')
+    _debug_log(f"Decal manifest loaded: atlas={atlas_w}x{atlas_h}, image={img_path}")
+    image = _load_atlas_image(img_path)
+    if image is None:
+        _debug_log(f"Decal image not found: {img_path}")
+        print('[Decal] Image not found, skipping decals.')
+        return
+    col = bpy.data.collections.get(collection_name)
+    if col is None:
+        _debug_log(f"Collection not found: {collection_name}")
+        return
+    bbox, center = _collection_bbox_and_center(col)
+    if bbox is None:
+        _debug_log('Collection bbox is empty, skipping decals.')
+        return
+
+    decal_col = _ensure_decal_collection(collection_name)
+    for obj in list(decal_col.objects):
+        bpy.data.objects.remove(obj, do_unlink=True)
+    for obj in list(col.objects):
+        if obj.get('is_decal'):
+            bpy.data.objects.remove(obj, do_unlink=True)
+
+    rng = random.Random(seed_value + 99173)
+    walls = _resolve_decal_walls(col)
+    _debug_log(f"Candidate walls: {len(walls)}")
+    created_count = 0
+    for wall in walls:
+        dims = wall.dimensions
+        _debug_log(f"Wall {wall.name}: dims=({dims.x:.3f}, {dims.y:.3f}, {dims.z:.3f})")
+        if dims.z < 0.5 or min(dims.x, dims.y) > max(dims.x, dims.y) * 0.75:
+            _debug_log('  skip geometry filter')
+            continue
+        roll = rng.random()
+        threshold = min(1.0, DECAL_DENSITY)
+        if DECAL_DENSITY <= 0.0 or roll > threshold:
+            _debug_log(f"  skip density roll={roll:.3f} threshold={threshold:.3f}")
+            continue
+        category = _pick_decal_category(manifest, rng)
+        _debug_log(f"  picked category={category}")
+        if category:
+            entries = manifest.get(category, [])
+            if entries:
+                region = entries[abs(hash(f'{wall.name}:{category}:{seed_value}')) % len(entries)]
+                _create_wall_decal_plane(decal_col, wall, region, atlas_w, atlas_h, image, category, f'{seed_value}:{wall.name}:{category}', center)
+                created_count += 1
+                _debug_log(f"  created decal category={category} tile={region.get('id', '<no-id>')}")
+        if DECAL_ENABLE_GROUND_STRIPS and manifest.get('ground_strips'):
+            grow_roll = rng.random()
+            grow_threshold = min(1.0, DECAL_DENSITY + 0.2)
+            if grow_roll < grow_threshold:
+                entries = manifest.get('ground_strips', [])
+                if entries:
+                    region = entries[abs(hash(f'{wall.name}:ground:{seed_value}')) % len(entries)]
+                    _create_wall_decal_plane(decal_col, wall, region, atlas_w, atlas_h, image, 'ground_strips', f'{seed_value}:{wall.name}:ground', center)
+                    created_count += 1
+                    _debug_log(f"  created decal category=ground_strips tile={region.get('id', '<no-id>')}")
+            else:
+                _debug_log(f"  skip ground strip roll={grow_roll:.3f} threshold={grow_threshold:.3f}")
+
+    _debug_log(f"Decals assigned total: {created_count}")
+    print(f'[Decal] Decals assigned: {created_count}')
+
+
 def generate():
     global HOUSE_WIDTH, HOUSE_DEPTH
     seed = random.SystemRandom().randint(0, 2**31 - 1) if AUTO_RANDOM_SEED else SEED
@@ -2762,6 +3037,8 @@ def generate():
 
     if ATLAS_ENABLED:
         apply_atlas_stage1(COLLECTION_NAME, seed)
+    if DECALS_ENABLED:
+        apply_decals_stage1(COLLECTION_NAME, seed)
 
     for area in bpy.context.screen.areas:
         if area.type == 'VIEW_3D':
@@ -2825,6 +3102,17 @@ _DEFAULTS = {
     "ATLAS_IMAGE_PATH": ATLAS_IMAGE_PATH,
     "ATLAS_INCLUDE_INTERIOR_WALLS": ATLAS_INCLUDE_INTERIOR_WALLS,
     "ATLAS_RANDOM_PICK": ATLAS_RANDOM_PICK,
+    "DECALS_ENABLED": DECALS_ENABLED,
+    "DECAL_MANIFEST_PATH": DECAL_MANIFEST_PATH,
+    "DECAL_IMAGE_PATH": DECAL_IMAGE_PATH,
+    "DECAL_DENSITY": DECAL_DENSITY,
+    "DECAL_ENABLE_STREAKS": DECAL_ENABLE_STREAKS,
+    "DECAL_ENABLE_GRIME": DECAL_ENABLE_GRIME,
+    "DECAL_ENABLE_GROUND_STRIPS": DECAL_ENABLE_GROUND_STRIPS,
+    "DECAL_ENABLE_CRACKS": DECAL_ENABLE_CRACKS,
+    "DECAL_ENABLE_CORNER_DIRT": DECAL_ENABLE_CORNER_DIRT,
+    "DECAL_ENABLE_EDGE_DIRT": DECAL_ENABLE_EDGE_DIRT,
+    "DEBUG_LOG_ENABLED": DEBUG_LOG_ENABLED,
     "MODULAR_TILES_ENABLED": MODULAR_TILES_ENABLED,
     "WALL_TILE_WIDTH": WALL_TILE_WIDTH,
     "SURFACE_TILE_SIZE": SURFACE_TILE_SIZE,
@@ -2847,6 +3135,7 @@ def apply_settings(settings: dict):
     global HOUSE_SCALE, TARGET_ROOM_COUNT, AUTO_RANDOM_SEED, SEED, MIN_FLOORS, MAX_FLOORS, FLOOR_TO_FLOOR_HEIGHT
     global BUILDING_MODE, SHAPE_MODE, STRICT_EDGE_TOL
     global ATLAS_ENABLED, ATLAS_MANIFEST_PATH, ATLAS_IMAGE_PATH, ATLAS_INCLUDE_INTERIOR_WALLS, ATLAS_RANDOM_PICK
+    global DECALS_ENABLED, DECAL_MANIFEST_PATH, DECAL_IMAGE_PATH, DECAL_DENSITY, DECAL_ENABLE_STREAKS, DECAL_ENABLE_GRIME, DECAL_ENABLE_GROUND_STRIPS, DECAL_ENABLE_CRACKS, DECAL_ENABLE_CORNER_DIRT, DECAL_ENABLE_EDGE_DIRT, DEBUG_LOG_ENABLED
     global MODULAR_TILES_ENABLED, WALL_TILE_WIDTH, SURFACE_TILE_SIZE
 
     for key, value in settings.items():

@@ -16,6 +16,9 @@ SETTING_NAMES = [
     "residual_corridor_shared_bonus", "house_scale", "target_room_count", "auto_random_seed", "seed",
     "min_floors", "max_floors", "building_mode", "shape_mode", "atlas_enabled", "atlas_manifest_path",
     "atlas_image_path", "atlas_include_interior_walls", "atlas_random_pick",
+    "decals_enabled", "decal_manifest_path", "decal_image_path", "decal_density",
+    "decal_enable_streaks", "decal_enable_grime", "decal_enable_ground_strips",
+    "decal_enable_cracks", "decal_enable_corner_dirt", "decal_enable_edge_dirt", "debug_log_enabled",
     "modular_tiles_enabled", "wall_tile_width", "surface_tile_size",
 ]
 
@@ -74,6 +77,17 @@ KEY_MAP = {
     "atlas_image_path": "ATLAS_IMAGE_PATH",
     "atlas_include_interior_walls": "ATLAS_INCLUDE_INTERIOR_WALLS",
     "atlas_random_pick": "ATLAS_RANDOM_PICK",
+    "decals_enabled": "DECALS_ENABLED",
+    "decal_manifest_path": "DECAL_MANIFEST_PATH",
+    "decal_image_path": "DECAL_IMAGE_PATH",
+    "decal_density": "DECAL_DENSITY",
+    "decal_enable_streaks": "DECAL_ENABLE_STREAKS",
+    "decal_enable_grime": "DECAL_ENABLE_GRIME",
+    "decal_enable_ground_strips": "DECAL_ENABLE_GROUND_STRIPS",
+    "decal_enable_cracks": "DECAL_ENABLE_CRACKS",
+    "decal_enable_corner_dirt": "DECAL_ENABLE_CORNER_DIRT",
+    "decal_enable_edge_dirt": "DECAL_ENABLE_EDGE_DIRT",
+    "debug_log_enabled": "DEBUG_LOG_ENABLED",
     "modular_tiles_enabled": "MODULAR_TILES_ENABLED",
     "wall_tile_width": "WALL_TILE_WIDTH",
     "surface_tile_size": "SURFACE_TILE_SIZE",
@@ -171,7 +185,9 @@ class FLOORPLAN_OT_atlas_apply_existing(bpy.types.Operator):
             core.apply_settings(settings)
             seed_value = props.seed if not props.auto_random_seed else 0
             core.apply_atlas_stage1(props.collection_name, seed_value)
-            self.report({'INFO'}, "Атлас применён к текущему дому")
+            if props.decals_enabled:
+                core.apply_decals_stage1(props.collection_name, seed_value)
+            self.report({'INFO'}, "Атлас и декали применены к текущему дому")
             return {'FINISHED'}
         except Exception as exc:
             self.report({'ERROR'}, f"Не удалось применить атлас: {exc}")

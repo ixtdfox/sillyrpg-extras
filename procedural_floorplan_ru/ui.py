@@ -114,6 +114,23 @@ class FLOORPLAN_PT_panel(bpy.types.Panel):
         g.prop(props, "atlas_door_width_scale")
         g.prop(props, "atlas_door_height_scale")
 
+        decals = layout.box()
+        decals.label(text="Декали")
+        decals.prop(props, "decals_enabled")
+        col = decals.column(align=True)
+        col.enabled = props.decals_enabled
+        col.prop(props, "decal_manifest_path")
+        col.prop(props, "decal_image_path")
+        col.prop(props, "decal_density", slider=True)
+        flow = col.grid_flow(columns=2, align=True)
+        flow.prop(props, "decal_enable_streaks")
+        flow.prop(props, "decal_enable_grime")
+        flow.prop(props, "decal_enable_ground_strips")
+        flow.prop(props, "decal_enable_cracks")
+        flow.prop(props, "decal_enable_corner_dirt")
+        flow.prop(props, "decal_enable_edge_dirt")
+        col.prop(props, "debug_log_enabled")
+
         editor = box.box()
         editor.label(text="Редактор выбранного тайла")
         editor.enabled = bool(props.atlas_manifest_json)

@@ -78,6 +78,17 @@ def apply_defaults_to_props(props):
     props.atlas_image_path = DEFAULTS["ATLAS_IMAGE_PATH"]
     props.atlas_include_interior_walls = DEFAULTS["ATLAS_INCLUDE_INTERIOR_WALLS"]
     props.atlas_random_pick = DEFAULTS["ATLAS_RANDOM_PICK"]
+    props.decals_enabled = DEFAULTS["DECALS_ENABLED"]
+    props.decal_manifest_path = DEFAULTS["DECAL_MANIFEST_PATH"]
+    props.decal_image_path = DEFAULTS["DECAL_IMAGE_PATH"]
+    props.decal_density = DEFAULTS["DECAL_DENSITY"]
+    props.decal_enable_streaks = DEFAULTS["DECAL_ENABLE_STREAKS"]
+    props.decal_enable_grime = DEFAULTS["DECAL_ENABLE_GRIME"]
+    props.decal_enable_ground_strips = DEFAULTS["DECAL_ENABLE_GROUND_STRIPS"]
+    props.decal_enable_cracks = DEFAULTS["DECAL_ENABLE_CRACKS"]
+    props.decal_enable_corner_dirt = DEFAULTS["DECAL_ENABLE_CORNER_DIRT"]
+    props.decal_enable_edge_dirt = DEFAULTS["DECAL_ENABLE_EDGE_DIRT"]
+    props.debug_log_enabled = DEFAULTS["DEBUG_LOG_ENABLED"]
     props.atlas_manifest_json = ""
     props.atlas_category = "walls"
     props.atlas_tile = ""
@@ -207,6 +218,18 @@ class FloorplanSettings(bpy.types.PropertyGroup):
     atlas_door_offset_y: FloatProperty(name="offset_y", description="Смещение текстуры двери по Y из placement.wall_doors.offset_y", default=0.0, soft_min=-5.0, soft_max=5.0)
     atlas_door_width_scale: FloatProperty(name="width_scale", description="Масштаб ширины дверной текстуры из placement.wall_doors.width_scale", default=1.0, min=0.001, soft_max=5.0)
     atlas_door_height_scale: FloatProperty(name="height_scale", description="Масштаб высоты дверной текстуры из placement.wall_doors.height_scale", default=1.0, min=0.001, soft_max=5.0)
+
+    decals_enabled: BoolProperty(name="Включить декали", description="Включить отдельный decal-atlas поверх базовых текстур", default=DEFAULTS["DECALS_ENABLED"])
+    decal_manifest_path: StringProperty(name="Путь к decal manifest.json", description="Путь к JSON-манифесту декалей. Можно использовать Blender-путь вида //decal_atlas_v2.json", default=DEFAULTS["DECAL_MANIFEST_PATH"], subtype='FILE_PATH')
+    decal_image_path: StringProperty(name="Путь к изображению декалей", description="Необязательный путь к PNG атласу декалей. Если пусто, будет взят из meta.source_image decal manifest.json", default=DEFAULTS["DECAL_IMAGE_PATH"], subtype='FILE_PATH')
+    decal_density: FloatProperty(name="Плотность декалей", description="Насколько часто раскладывать декали по наружным стенам", default=DEFAULTS["DECAL_DENSITY"], min=0.0, max=1.0, subtype='FACTOR')
+    decal_enable_streaks: BoolProperty(name="Подтёки", description="Использовать вертикальные водяные подтёки", default=DEFAULTS["DECAL_ENABLE_STREAKS"])
+    decal_enable_grime: BoolProperty(name="Случайные пятна", description="Использовать случайные пятна и общую грязь", default=DEFAULTS["DECAL_ENABLE_GRIME"])
+    decal_enable_ground_strips: BoolProperty(name="Полосы грязи у земли", description="Добавлять длинные полосы грязи у основания наружных стен", default=DEFAULTS["DECAL_ENABLE_GROUND_STRIPS"])
+    decal_enable_cracks: BoolProperty(name="Трещины", description="Использовать decal-трещины на части наружных стен", default=DEFAULTS["DECAL_ENABLE_CRACKS"])
+    decal_enable_corner_dirt: BoolProperty(name="Грязь в углах", description="Использовать угловые decal-пятна", default=DEFAULTS["DECAL_ENABLE_CORNER_DIRT"])
+    decal_enable_edge_dirt: BoolProperty(name="Грязь по краям", description="Использовать горизонтальные и кромочные decal-пятна", default=DEFAULTS["DECAL_ENABLE_EDGE_DIRT"])
+    debug_log_enabled: BoolProperty(name="Debug log", description="Писать подробный лог генерации декалей в консоль и в Blender Text: FloorPlan_Debug_Log", default=DEFAULTS["DEBUG_LOG_ENABLED"])
 
     modular_tiles_enabled: BoolProperty(name="Модульные 3D-тайлы", description="Собирать стены, полы и крыши из модульных тайлов вместо крупных кусков", default=DEFAULTS["MODULAR_TILES_ENABLED"])
     wall_tile_width: FloatProperty(name="Шаг стены", description="Длина одного стенового тайла вдоль стены", default=DEFAULTS["WALL_TILE_WIDTH"], min=0.1, soft_max=2.0)
