@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
-from mathutils import Vector, Euler
+from mathutils import Vector, Matrix
 
 # ============================================================
 # Procedural floor plan for Blender 4.0
@@ -2628,6 +2628,42 @@ def _assign_uv_to_bbox(obj, region, atlas_w, atlas_h, rotate_cw_90=False):
 
             uv_layer[li].uv = (u, vv)
 
+
+def _assign_uv_to_world_basis(obj, region, atlas_w, atlas_h, tangent_world, up_world=Vector((0.0, 0.0, 1.0))):
+    mesh = obj.data
+    if not mesh.uv_layers:
+        mesh.uv_layers.new(name="AtlasUV")
+    uv_layer = mesh.uv_layers.active.data
+
+    tangent = tangent_world.normalized()
+    up = up_world.normalized()
+
+    min_u = region["x"] / atlas_w
+    max_u = (region["x"] + region["w"]) / atlas_w
+    # image origin in JSON is top-left; Blender UV origin is bottom-left
+    min_v = 1.0 - (region["y"] + region["h"]) / atlas_h
+    max_v = 1.0 - region["y"] / atlas_h
+
+    world_verts = [obj.matrix_world @ v.co for v in mesh.vertices]
+    us = [co.dot(tangent) for co in world_verts]
+    vs = [co.dot(up) for co in world_verts]
+    min_proj_u, max_proj_u = min(us), max(us)
+    min_proj_v, max_proj_v = min(vs), max(vs)
+
+    def remap(val, a, b, c, d):
+        if abs(b - a) < 1e-8:
+            return (c + d) * 0.5
+        t = (val - a) / (b - a)
+        return c + (d - c) * t
+
+    for poly in mesh.polygons:
+        for li in poly.loop_indices:
+            vi = mesh.loops[li].vertex_index
+            co = world_verts[vi]
+            u = remap(co.dot(tangent), min_proj_u, max_proj_u, min_u, max_u)
+            vv = remap(co.dot(up), min_proj_v, max_proj_v, min_v, max_v)
+            uv_layer[li].uv = (u, vv)
+
 def apply_atlas_stage1(collection_name: str, seed_value: int):
     manifest = _load_json(ATLAS_MANIFEST_PATH)
     if manifest is None:
@@ -2829,14 +2865,36 @@ def _pick_decal_category(manifest, rng):
     return rng.choice(cats) if cats else None
 
 
+def _wall_decal_world_basis(wall_obj, center):
+    dims = wall_obj.dimensions
+    thin_x = dims.x <= dims.y
+    up_world = Vector((0.0, 0.0, 1.0))
+
+    if thin_x:
+        outward = -1.0 if wall_obj.location.x < center.x else 1.0
+        normal_world = Vector((outward, 0.0, 0.0))
+        wall_span = max(dims.y, 0.2)
+    else:
+        outward = -1.0 if wall_obj.location.y < center.y else 1.0
+        normal_world = Vector((0.0, outward, 0.0))
+        wall_span = max(dims.x, 0.2)
+
+    # Keep a right-handed basis for every facade.
+    # tangent x up == normal, so opposite facades don't get mirrored UVs.
+    tangent_world = up_world.cross(normal_world).normalized()
+
+    return thin_x, wall_span, tangent_world, up_world, normal_world
+
+
 def _create_wall_decal_plane(target_col, wall_obj, region, atlas_w, atlas_h, image, category, seed_tag, center):
     dims = wall_obj.dimensions
     eps = 0.03
     rng = random.Random(abs(hash(seed_tag)))
-    thin_x = dims.x <= dims.y
+    thin_x, wall_span, tangent_world, up_world, normal_world = _wall_decal_world_basis(wall_obj, center)
     loc = wall_obj.location.copy()
-    rot = Euler((0.0, 0.0, 0.0), 'XYZ')
-    width = max(dims.y if thin_x else dims.x, 0.2)
+    rot_basis = Matrix((tangent_world, up_world, normal_world)).transposed()
+    rot = rot_basis.to_euler('XYZ')
+    width = max(wall_span, 0.2)
     height = max(dims.z, 0.2)
     if category == 'ground_strips':
         height = min(height * 0.35, max(0.4, region.get('tile_height_m', 1.0)))
@@ -2854,17 +2912,13 @@ def _create_wall_decal_plane(target_col, wall_obj, region, atlas_w, atlas_h, ima
         lateral = rng.uniform(-max_lateral, max_lateral)
 
     if thin_x:
-        sign = -1.0 if wall_obj.location.x < center.x else 1.0
-        loc.x += sign * (dims.x * 0.5 + eps)
+        loc.x += normal_world.x * (dims.x * 0.5 + eps)
         loc.y += lateral
         loc.z = z_center
-        rot.rotate_axis('Y', math.radians(90.0))
     else:
-        sign = -1.0 if wall_obj.location.y < center.y else 1.0
-        loc.y += sign * (dims.y * 0.5 + eps)
+        loc.y += normal_world.y * (dims.y * 0.5 + eps)
         loc.x += lateral
         loc.z = z_center
-        rot.rotate_axis('X', math.radians(90.0))
 
     bpy.ops.mesh.primitive_plane_add(location=loc, rotation=rot)
     obj = bpy.context.active_object
@@ -2877,9 +2931,12 @@ def _create_wall_decal_plane(target_col, wall_obj, region, atlas_w, atlas_h, ima
     obj["atlas_category"] = category
     obj["is_decal"] = True
     obj["decal_target"] = wall_obj.name
+    obj["decal_basis"] = "world_tangent_up_normal_v2"
+    obj["decal_tangent_world"] = tuple(tangent_world)
+    obj["decal_normal_world"] = tuple(normal_world)
     obj.data.materials.clear()
     obj.data.materials.append(_ensure_decal_material(f"Decal_{category}", image))
-    _assign_uv_to_bbox(obj, region, atlas_w, atlas_h, rotate_cw_90=True)
+    _assign_uv_to_world_basis(obj, region, atlas_w, atlas_h, tangent_world, up_world)
     return obj
 
 
