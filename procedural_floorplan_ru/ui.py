@@ -47,6 +47,27 @@ class FLOORPLAN_PT_panel(bpy.types.Panel):
         sub.prop(props, "wall_tile_width")
         sub.prop(props, "surface_tile_size")
 
+        trim_box = mod_box.box()
+        trim_box.label(text="Бортики и балки")
+
+        roof_box = trim_box.box()
+        roof_box.prop(props, "roof_border_enabled")
+        roof_col = roof_box.column(align=True)
+        roof_col.enabled = props.roof_border_enabled
+        roof_col.prop(props, "roof_border_width")
+        roof_col.prop(props, "roof_border_height")
+        roof_col.prop(props, "roof_border_tile_category")
+        roof_col.prop(props, "roof_border_tile_id")
+
+        band_box = trim_box.box()
+        band_box.prop(props, "floor_band_enabled")
+        band_col = band_box.column(align=True)
+        band_col.enabled = props.floor_band_enabled
+        band_col.prop(props, "floor_band_depth")
+        band_col.prop(props, "floor_band_height")
+        band_col.prop(props, "floor_band_tile_category")
+        band_col.prop(props, "floor_band_tile_id")
+
         box = layout.box()
         box.label(text="Окна")
         col = box.column(align=True)
@@ -122,14 +143,13 @@ class FLOORPLAN_PT_panel(bpy.types.Panel):
         col.prop(props, "decal_manifest_path")
         col.prop(props, "decal_image_path")
         col.prop(props, "decal_density", slider=True)
-        flow = col.grid_flow(columns=2, align=True)
-        flow.prop(props, "decal_enable_streaks")
-        flow.prop(props, "decal_enable_grime")
-        flow.prop(props, "decal_enable_ground_strips")
-        flow.prop(props, "decal_enable_cracks")
-        flow.prop(props, "decal_enable_corner_dirt")
-        flow.prop(props, "decal_enable_edge_dirt")
+        col.prop(props, "decal_enable_streaks")
         col.prop(props, "debug_log_enabled")
+        help_box = decals.box()
+        help_box.enabled = props.decals_enabled
+        help_box.label(text="Правила: верх декали = нижняя кромка крыши")
+        help_box.label(text="Ширина каждой декали всегда 1 метр")
+        help_box.label(text="Тайлы выбираются случайно из under_roof_drips")
 
         editor = box.box()
         editor.label(text="Редактор выбранного тайла")

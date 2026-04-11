@@ -83,11 +83,11 @@ def apply_defaults_to_props(props):
     props.decal_image_path = DEFAULTS["DECAL_IMAGE_PATH"]
     props.decal_density = DEFAULTS["DECAL_DENSITY"]
     props.decal_enable_streaks = DEFAULTS["DECAL_ENABLE_STREAKS"]
-    props.decal_enable_grime = DEFAULTS["DECAL_ENABLE_GRIME"]
-    props.decal_enable_ground_strips = DEFAULTS["DECAL_ENABLE_GROUND_STRIPS"]
-    props.decal_enable_cracks = DEFAULTS["DECAL_ENABLE_CRACKS"]
-    props.decal_enable_corner_dirt = DEFAULTS["DECAL_ENABLE_CORNER_DIRT"]
-    props.decal_enable_edge_dirt = DEFAULTS["DECAL_ENABLE_EDGE_DIRT"]
+    props.decal_enable_grime = False
+    props.decal_enable_ground_strips = False
+    props.decal_enable_cracks = False
+    props.decal_enable_corner_dirt = False
+    props.decal_enable_edge_dirt = False
     props.debug_log_enabled = DEFAULTS["DEBUG_LOG_ENABLED"]
     props.atlas_manifest_json = ""
     props.atlas_category = "walls"
@@ -110,6 +110,16 @@ def apply_defaults_to_props(props):
     props.modular_tiles_enabled = DEFAULTS["MODULAR_TILES_ENABLED"]
     props.wall_tile_width = DEFAULTS["WALL_TILE_WIDTH"]
     props.surface_tile_size = DEFAULTS["SURFACE_TILE_SIZE"]
+    props.roof_border_enabled = DEFAULTS["ROOF_BORDER_ENABLED"]
+    props.roof_border_width = DEFAULTS["ROOF_BORDER_WIDTH"]
+    props.roof_border_height = DEFAULTS["ROOF_BORDER_HEIGHT"]
+    props.roof_border_tile_category = DEFAULTS["ROOF_BORDER_TILE_CATEGORY"]
+    props.roof_border_tile_id = DEFAULTS["ROOF_BORDER_TILE_ID"]
+    props.floor_band_enabled = DEFAULTS["FLOOR_BAND_ENABLED"]
+    props.floor_band_depth = DEFAULTS["FLOOR_BAND_DEPTH"]
+    props.floor_band_height = DEFAULTS["FLOOR_BAND_HEIGHT"]
+    props.floor_band_tile_category = DEFAULTS["FLOOR_BAND_TILE_CATEGORY"]
+    props.floor_band_tile_id = DEFAULTS["FLOOR_BAND_TILE_ID"]
 
 
 class FloorplanSettings(bpy.types.PropertyGroup):
@@ -222,18 +232,28 @@ class FloorplanSettings(bpy.types.PropertyGroup):
     decals_enabled: BoolProperty(name="Включить декали", description="Включить отдельный decal-atlas поверх базовых текстур", default=DEFAULTS["DECALS_ENABLED"])
     decal_manifest_path: StringProperty(name="Путь к decal manifest.json", description="Путь к JSON-манифесту декалей. Можно использовать Blender-путь вида //decal_atlas_v2.json", default=DEFAULTS["DECAL_MANIFEST_PATH"], subtype='FILE_PATH')
     decal_image_path: StringProperty(name="Путь к изображению декалей", description="Необязательный путь к PNG атласу декалей. Если пусто, будет взят из meta.source_image decal manifest.json", default=DEFAULTS["DECAL_IMAGE_PATH"], subtype='FILE_PATH')
-    decal_density: FloatProperty(name="Плотность декалей", description="Насколько часто раскладывать декали по наружным стенам", default=DEFAULTS["DECAL_DENSITY"], min=0.0, max=1.0, subtype='FACTOR')
-    decal_enable_streaks: BoolProperty(name="Подтёки", description="Использовать вертикальные водяные подтёки", default=DEFAULTS["DECAL_ENABLE_STREAKS"])
-    decal_enable_grime: BoolProperty(name="Случайные пятна", description="Использовать случайные пятна и общую грязь", default=DEFAULTS["DECAL_ENABLE_GRIME"])
-    decal_enable_ground_strips: BoolProperty(name="Полосы грязи у земли", description="Добавлять длинные полосы грязи у основания наружных стен", default=DEFAULTS["DECAL_ENABLE_GROUND_STRIPS"])
-    decal_enable_cracks: BoolProperty(name="Трещины", description="Использовать decal-трещины на части наружных стен", default=DEFAULTS["DECAL_ENABLE_CRACKS"])
-    decal_enable_corner_dirt: BoolProperty(name="Грязь в углах", description="Использовать угловые decal-пятна", default=DEFAULTS["DECAL_ENABLE_CORNER_DIRT"])
-    decal_enable_edge_dirt: BoolProperty(name="Грязь по краям", description="Использовать горизонтальные и кромочные decal-пятна", default=DEFAULTS["DECAL_ENABLE_EDGE_DIRT"])
+    decal_density: FloatProperty(name="Плотность подтёков", description="Вероятность поставить подтёк на каждый 1-метровый фасадный тайл под крышей", default=DEFAULTS["DECAL_DENSITY"], min=0.0, max=1.0, subtype='FACTOR')
+    decal_enable_streaks: BoolProperty(name="Подтёки под крышей", description="Ставить вертикальные подтёки только под нижней кромкой крыши", default=DEFAULTS["DECAL_ENABLE_STREAKS"])
+    decal_enable_grime: BoolProperty(name="Случайные пятна", description="Устаревшая опция. Не используется в режиме подтёков под крышей", default=DEFAULTS["DECAL_ENABLE_GRIME"], options={'HIDDEN'})
+    decal_enable_ground_strips: BoolProperty(name="Полосы грязи у земли", description="Устаревшая опция. Не используется в режиме подтёков под крышей", default=DEFAULTS["DECAL_ENABLE_GROUND_STRIPS"], options={'HIDDEN'})
+    decal_enable_cracks: BoolProperty(name="Трещины", description="Устаревшая опция. Не используется в режиме подтёков под крышей", default=DEFAULTS["DECAL_ENABLE_CRACKS"], options={'HIDDEN'})
+    decal_enable_corner_dirt: BoolProperty(name="Грязь в углах", description="Устаревшая опция. Не используется в режиме подтёков под крышей", default=DEFAULTS["DECAL_ENABLE_CORNER_DIRT"], options={'HIDDEN'})
+    decal_enable_edge_dirt: BoolProperty(name="Грязь по краям", description="Устаревшая опция. Не используется в режиме подтёков под крышей", default=DEFAULTS["DECAL_ENABLE_EDGE_DIRT"], options={'HIDDEN'})
     debug_log_enabled: BoolProperty(name="Debug log", description="Писать подробный лог генерации декалей в консоль и в Blender Text: FloorPlan_Debug_Log", default=DEFAULTS["DEBUG_LOG_ENABLED"])
 
     modular_tiles_enabled: BoolProperty(name="Модульные 3D-тайлы", description="Собирать стены, полы и крыши из модульных тайлов вместо крупных кусков", default=DEFAULTS["MODULAR_TILES_ENABLED"])
     wall_tile_width: FloatProperty(name="Шаг стены", description="Длина одного стенового тайла вдоль стены", default=DEFAULTS["WALL_TILE_WIDTH"], min=0.1, soft_max=2.0)
     surface_tile_size: FloatProperty(name="Тайл пола/крыши", description="Размер тайла пола и крыши по X/Y", default=DEFAULTS["SURFACE_TILE_SIZE"], min=0.1, soft_max=2.0)
+    roof_border_enabled: BoolProperty(name="Бортики по крыше", description="Добавлять по внешнему периметру крыши бортики из 1-метровых тайлов", default=DEFAULTS["ROOF_BORDER_ENABLED"])
+    roof_border_width: FloatProperty(name="Толщина бортика", description="Толщина бортика по крыше в метрах", default=DEFAULTS["ROOF_BORDER_WIDTH"], min=0.01, soft_max=1.0)
+    roof_border_height: FloatProperty(name="Высота бортика", description="Высота бортика по крыше в метрах", default=DEFAULTS["ROOF_BORDER_HEIGHT"], min=0.01, soft_max=1.0)
+    roof_border_tile_category: EnumProperty(name="Категория текстуры бортика", description="Категория тайла из общего atlas manifest.json для бортиков крыши", items=atlas_manifest.category_items, default=DEFAULTS["ROOF_BORDER_TILE_CATEGORY"])
+    roof_border_tile_id: StringProperty(name="ID тайла бортика", description="Какой id тайла использовать для бортиков крыши. Если пусто, будет случайный выбор внутри категории", default=DEFAULTS["ROOF_BORDER_TILE_ID"])
+    floor_band_enabled: BoolProperty(name="Межэтажные балки", description="Добавлять горизонтальные балки по внешнему шву между этажами", default=DEFAULTS["FLOOR_BAND_ENABLED"])
+    floor_band_depth: FloatProperty(name="Толщина балки", description="Насколько балка выступает от стены наружу, в метрах", default=DEFAULTS["FLOOR_BAND_DEPTH"], min=0.01, soft_max=1.0)
+    floor_band_height: FloatProperty(name="Высота балки", description="Высота межэтажной балки в метрах", default=DEFAULTS["FLOOR_BAND_HEIGHT"], min=0.01, soft_max=1.0)
+    floor_band_tile_category: EnumProperty(name="Категория текстуры балки", description="Категория тайла из общего atlas manifest.json для межэтажных балок", items=atlas_manifest.category_items, default=DEFAULTS["FLOOR_BAND_TILE_CATEGORY"])
+    floor_band_tile_id: StringProperty(name="ID тайла балки", description="Какой id тайла использовать для межэтажных балок. Если пусто, будет случайный выбор внутри категории", default=DEFAULTS["FLOOR_BAND_TILE_ID"])
 
 
 classes = (FloorplanSettings,)

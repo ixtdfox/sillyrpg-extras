@@ -11,6 +11,8 @@ ATLAS_CATEGORIES = [
     ("wall_doors", "wall_doors", "Стены с дверями"),
     ("floors", "floors", "Полы"),
     ("roofs", "roofs", "Крыши"),
+    ("roof_borders", "roof_borders", "Бортики крыши"),
+    ("floor_bands", "floor_bands", "Межэтажные балки"),
     ("stairs", "stairs", "Ступени"),
     ("stair_landings", "stair_landings", "Лестничные площадки"),
 ]

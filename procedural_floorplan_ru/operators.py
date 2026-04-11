@@ -20,6 +20,8 @@ SETTING_NAMES = [
     "decal_enable_streaks", "decal_enable_grime", "decal_enable_ground_strips",
     "decal_enable_cracks", "decal_enable_corner_dirt", "decal_enable_edge_dirt", "debug_log_enabled",
     "modular_tiles_enabled", "wall_tile_width", "surface_tile_size",
+    "roof_border_enabled", "roof_border_width", "roof_border_height", "roof_border_tile_category", "roof_border_tile_id",
+    "floor_band_enabled", "floor_band_depth", "floor_band_height", "floor_band_tile_category", "floor_band_tile_id",
 ]
 
 KEY_MAP = {
@@ -91,6 +93,16 @@ KEY_MAP = {
     "modular_tiles_enabled": "MODULAR_TILES_ENABLED",
     "wall_tile_width": "WALL_TILE_WIDTH",
     "surface_tile_size": "SURFACE_TILE_SIZE",
+    "roof_border_enabled": "ROOF_BORDER_ENABLED",
+    "roof_border_width": "ROOF_BORDER_WIDTH",
+    "roof_border_height": "ROOF_BORDER_HEIGHT",
+    "roof_border_tile_category": "ROOF_BORDER_TILE_CATEGORY",
+    "roof_border_tile_id": "ROOF_BORDER_TILE_ID",
+    "floor_band_enabled": "FLOOR_BAND_ENABLED",
+    "floor_band_depth": "FLOOR_BAND_DEPTH",
+    "floor_band_height": "FLOOR_BAND_HEIGHT",
+    "floor_band_tile_category": "FLOOR_BAND_TILE_CATEGORY",
+    "floor_band_tile_id": "FLOOR_BAND_TILE_ID",
 }
 
 
@@ -178,13 +190,15 @@ class FLOORPLAN_OT_atlas_apply_existing(bpy.types.Operator):
     def execute(self, context):
         props = context.scene.floorplan_ru_settings
         try:
+            manifest_override = None
             if props.atlas_manifest_json:
-                manifest = atlas_manifest.apply_editor_to_manifest(props)
-                atlas_manifest.save_manifest_to_props(props, manifest)
+                # ВАЖНО: кнопка "Применить атлас" не должна сохранять manifest.json на диск.
+                # Она только собирает текущие значения редактора во временный manifest в памяти.
+                manifest_override = atlas_manifest.apply_editor_to_manifest(props)
             settings = _settings_from_props(props)
             core.apply_settings(settings)
             seed_value = props.seed if not props.auto_random_seed else 0
-            core.apply_atlas_stage1(props.collection_name, seed_value)
+            core.apply_atlas_stage1(props.collection_name, seed_value, manifest_override=manifest_override, persist_default_manifest=False)
             if props.decals_enabled:
                 core.apply_decals_stage1(props.collection_name, seed_value)
             self.report({'INFO'}, "Атлас и декали применены к текущему дому")

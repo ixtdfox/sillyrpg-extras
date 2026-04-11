@@ -78,6 +78,18 @@ MODULAR_TILES_ENABLED = True
 WALL_TILE_WIDTH = 1.0
 SURFACE_TILE_SIZE = 1.0
 
+ROOF_BORDER_ENABLED = True
+ROOF_BORDER_WIDTH = 0.2
+ROOF_BORDER_HEIGHT = 0.2
+ROOF_BORDER_TILE_CATEGORY = "walls"
+ROOF_BORDER_TILE_ID = ""
+
+FLOOR_BAND_ENABLED = True
+FLOOR_BAND_DEPTH = 0.1
+FLOOR_BAND_HEIGHT = 0.1
+FLOOR_BAND_TILE_CATEGORY = "walls"
+FLOOR_BAND_TILE_ID = ""
+
 # creative: upper floors may have different footprints
 # strict: every floor is scaled to match the 1st floor footprint exactly
 BUILDING_MODE = "creative"  # or "strict"
@@ -2425,6 +2437,166 @@ def add_roof_tiles_world_aligned(col, name_prefix: str, patch: Rect, z: float, t
     return created
 
 
+
+
+def _boundary_runs_from_rects(rects: List[Rect], unit: float = 1.0):
+    unit = max(EPS, float(unit))
+    edge_counts = {}
+
+    def add_h(y: float, x0: float, x1: float):
+        length = x1 - x0
+        steps = max(1, int(round(length / unit)))
+        cursor = x0
+        for _ in range(steps):
+            key = ("H", round(y, 6), round(cursor, 6), round(cursor + unit, 6))
+            edge_counts[key] = edge_counts.get(key, 0) + 1
+            cursor += unit
+
+    def add_v(x: float, y0: float, y1: float):
+        length = y1 - y0
+        steps = max(1, int(round(length / unit)))
+        cursor = y0
+        for _ in range(steps):
+            key = ("V", round(x, 6), round(cursor, 6), round(cursor + unit, 6))
+            edge_counts[key] = edge_counts.get(key, 0) + 1
+            cursor += unit
+
+    for rect in rects:
+        if rect.w <= EPS or rect.h <= EPS:
+            continue
+        add_h(rect.y, rect.x, rect.x2)
+        add_h(rect.y2, rect.x, rect.x2)
+        add_v(rect.x, rect.y, rect.y2)
+        add_v(rect.x2, rect.y, rect.y2)
+
+    boundary = [key for key, count in edge_counts.items() if count == 1]
+    h_groups = {}
+    v_groups = {}
+    for ori, fixed, a0, a1 in boundary:
+        if ori == "H":
+            h_groups.setdefault(fixed, []).append((a0, a1))
+        else:
+            v_groups.setdefault(fixed, []).append((a0, a1))
+
+    runs = []
+    for fixed, parts in h_groups.items():
+        parts.sort()
+        cur0 = cur1 = None
+        for a0, a1 in parts:
+            if cur0 is None:
+                cur0, cur1 = a0, a1
+            elif abs(a0 - cur1) <= 1e-5:
+                cur1 = a1
+            else:
+                runs.append(("H", fixed, cur0, cur1))
+                cur0, cur1 = a0, a1
+        if cur0 is not None:
+            runs.append(("H", fixed, cur0, cur1))
+
+    for fixed, parts in v_groups.items():
+        parts.sort()
+        cur0 = cur1 = None
+        for a0, a1 in parts:
+            if cur0 is None:
+                cur0, cur1 = a0, a1
+            elif abs(a0 - cur1) <= 1e-5:
+                cur1 = a1
+            else:
+                runs.append(("V", fixed, cur0, cur1))
+                cur0, cur1 = a0, a1
+        if cur0 is not None:
+            runs.append(("V", fixed, cur0, cur1))
+
+    return runs
+
+
+def _point_in_any_rect(px: float, py: float, rects: List[Rect], margin: float = 1e-4) -> bool:
+    for rect in rects:
+        if (rect.x + margin) <= px <= (rect.x2 - margin) and (rect.y + margin) <= py <= (rect.y2 - margin):
+            return True
+    return False
+
+
+def _add_tiled_linear_trim(col, name_prefix: str, runs, z_center: float, vertical_size: float, side_size: float, *, inward=True, atlas_category="walls", atlas_tile_id="", source_rects: Optional[List[Rect]] = None):
+    tile_len = 1.0
+    created = []
+    vertical_size = max(0.01, float(vertical_size))
+    side_size = max(0.01, float(side_size))
+    source_rects = source_rects or []
+    probe = max(0.02, side_size * 0.6)
+    for run_idx, (orientation, fixed, start, end) in enumerate(runs):
+        parts = _split_length_into_tiles(end - start, tile_len, keep_uniform=True)
+        axis_start = start
+        mid_axis = (start + end) * 0.5
+        if orientation == "H":
+            inside_pos = _point_in_any_rect(mid_axis, fixed + probe, source_rects)
+            inside_neg = _point_in_any_rect(mid_axis, fixed - probe, source_rects)
+        else:
+            inside_pos = _point_in_any_rect(fixed + probe, mid_axis, source_rects)
+            inside_neg = _point_in_any_rect(fixed - probe, mid_axis, source_rects)
+        if inside_pos and not inside_neg:
+            dir_sign = 1.0 if inward else -1.0
+        elif inside_neg and not inside_pos:
+            dir_sign = -1.0 if inward else 1.0
+        else:
+            dir_sign = 1.0
+
+        for tile_idx, (offset, seg_len) in enumerate(parts):
+            center_axis = axis_start + offset
+            if orientation == "H":
+                x = center_axis
+                y = fixed + dir_sign * side_size * 0.5
+                obj = add_box(col, f"{name_prefix}_{run_idx}_{tile_idx}", x, y, z_center, seg_len, side_size, vertical_size)
+            else:
+                x = fixed + dir_sign * side_size * 0.5
+                y = center_axis
+                obj = add_box(col, f"{name_prefix}_{run_idx}_{tile_idx}", x, y, z_center, side_size, seg_len, vertical_size)
+
+            obj["atlas_category"] = str(atlas_category or "walls")
+            if atlas_tile_id:
+                obj["atlas_tile_id"] = str(atlas_tile_id)
+            created.append(obj)
+    return created
+
+
+def add_roof_borders(col, roof_patches: List[Rect], z_offset: float):
+    if not ROOF_BORDER_ENABLED or not roof_patches:
+        return []
+    roof_z = z_offset + WALL_HEIGHT + FLOOR_THICKNESS * 0.5
+    top_z = roof_z + FLOOR_THICKNESS * 0.5 + ROOF_BORDER_HEIGHT * 0.5
+    runs = _boundary_runs_from_rects(roof_patches, unit=1.0)
+    return _add_tiled_linear_trim(
+        col,
+        f"RoofBorder_{int(z_offset*1000)}",
+        runs,
+        top_z,
+        ROOF_BORDER_HEIGHT,
+        ROOF_BORDER_WIDTH,
+        inward=True,
+        atlas_category=ROOF_BORDER_TILE_CATEGORY,
+        atlas_tile_id=ROOF_BORDER_TILE_ID,
+        source_rects=roof_patches,
+    )
+
+
+def add_floor_seam_bands(col, footprint_rects: List[Rect], z_offset: float):
+    if not FLOOR_BAND_ENABLED or not footprint_rects or z_offset <= EPS:
+        return []
+    seam_z = z_offset - FLOOR_THICKNESS * 0.5
+    runs = _boundary_runs_from_rects(footprint_rects, unit=1.0)
+    return _add_tiled_linear_trim(
+        col,
+        f"FloorBand_{int(z_offset*1000)}",
+        runs,
+        seam_z,
+        FLOOR_BAND_HEIGHT,
+        FLOOR_BAND_DEPTH,
+        inward=False,
+        atlas_category=FLOOR_BAND_TILE_CATEGORY,
+        atlas_tile_id=FLOOR_BAND_TILE_ID,
+        source_rects=footprint_rects,
+    )
+
 def add_roof_patches(col, current_patches: List[Rect], z_offset: float, next_patches: Optional[List[Rect]] = None, opening_rect: Optional[Rect] = None, open_void: Optional[Rect] = None):
     roof_mat = ensure_material("FP_Roof", (0.72, 0.72, 0.74, 1.0))
     roof_z = z_offset + WALL_HEIGHT + FLOOR_THICKNESS * 0.5
@@ -2441,6 +2613,8 @@ def add_roof_patches(col, current_patches: List[Rect], z_offset: float, next_pat
             add_roof_tiles_world_aligned(col, f"Roof_{int(z_offset*1000)}_{patch_index}", patch, roof_z, FLOOR_THICKNESS, SURFACE_TILE_SIZE, roof_mat)
         else:
             add_box(col, f"Roof_{int(z_offset*1000)}_{patch_index}", patch.cx, patch.cy, roof_z, patch.w, patch.h, FLOOR_THICKNESS, roof_mat)
+    add_roof_borders(col, roof_targets, z_offset)
+    return roof_targets
 
 
 
@@ -2461,11 +2635,11 @@ DECAL_MANIFEST_PATH = "//decal_atlas_v2.json"
 DECAL_IMAGE_PATH = ""   # if empty, taken from decal manifest meta.source_image
 DECAL_DENSITY = 0.35
 DECAL_ENABLE_STREAKS = True
-DECAL_ENABLE_GRIME = True
-DECAL_ENABLE_GROUND_STRIPS = True
-DECAL_ENABLE_CRACKS = True
-DECAL_ENABLE_CORNER_DIRT = True
-DECAL_ENABLE_EDGE_DIRT = True
+DECAL_ENABLE_GRIME = False
+DECAL_ENABLE_GROUND_STRIPS = False
+DECAL_ENABLE_CRACKS = False
+DECAL_ENABLE_CORNER_DIRT = False
+DECAL_ENABLE_EDGE_DIRT = False
 DEBUG_LOG_ENABLED = False
 DEBUG_TEXT_NAME = "FloorPlan_Debug_Log"
 
@@ -2516,6 +2690,12 @@ def _write_default_atlas_manifest(path_str: str):
         "roofs": [
             {"id": "roof_01", "x": 512, "y": 768, "w": 256, "h": 256, "tile_width_m": 2.0, "tile_height_m": 2.0},
             {"id": "roof_02", "x": 768, "y": 768, "w": 256, "h": 256, "tile_width_m": 2.0, "tile_height_m": 2.0}
+        ],
+        "roof_borders": [
+            {"id": "roof_border_01", "x": 0, "y": 0, "w": 256, "h": 256, "tile_width_m": 1.0, "tile_height_m": 0.2}
+        ],
+        "floor_bands": [
+            {"id": "floor_band_01", "x": 256, "y": 0, "w": 256, "h": 256, "tile_width_m": 1.0, "tile_height_m": 0.1}
         ],
         "stairs": [
             {"id": "stair_01", "x": 768, "y": 512, "w": 128, "h": 128, "tile_width_m": 1.0, "tile_height_m": 1.0},
@@ -2664,10 +2844,13 @@ def _assign_uv_to_world_basis(obj, region, atlas_w, atlas_h, tangent_world, up_w
             vv = remap(co.dot(up), min_proj_v, max_proj_v, min_v, max_v)
             uv_layer[li].uv = (u, vv)
 
-def apply_atlas_stage1(collection_name: str, seed_value: int):
-    manifest = _load_json(ATLAS_MANIFEST_PATH)
+def apply_atlas_stage1(collection_name: str, seed_value: int, manifest_override: Optional[dict] = None, persist_default_manifest: bool = True):
+    manifest = manifest_override if manifest_override is not None else _load_json(ATLAS_MANIFEST_PATH)
     if manifest is None:
-        manifest = _write_default_atlas_manifest(ATLAS_MANIFEST_PATH)
+        if persist_default_manifest:
+            manifest = _write_default_atlas_manifest(ATLAS_MANIFEST_PATH)
+        else:
+            manifest = _default_atlas_manifest()
 
     meta = manifest.get("meta", {})
     atlas_w = meta.get("atlas_width", 1024)
@@ -2686,7 +2869,9 @@ def apply_atlas_stage1(collection_name: str, seed_value: int):
         "floors": manifest.get("floors", []),
         "roofs": manifest.get("roofs", []),
         "stairs": manifest.get("stairs", []),
-        "stair_landings": manifest.get("stair_landings", [])
+        "stair_landings": manifest.get("stair_landings", []),
+        "roof_borders": manifest.get("roof_borders", manifest.get("walls", [])),
+        "floor_bands": manifest.get("floor_bands", manifest.get("walls", [])),
     }
 
     mat_cache = {}
@@ -2709,7 +2894,11 @@ def apply_atlas_stage1(collection_name: str, seed_value: int):
         # Generated window glass uses a dedicated glass atlas category.
         if name.startswith("GLZ_") or obj.get("generated_glass"):
             category = "glass"
-        if name.startswith("Roof_"):
+        if name.startswith("RoofBorder_"):
+            category = "roof_borders"
+        elif name.startswith("FloorBand_"):
+            category = "floor_bands"
+        elif name.startswith("Roof_"):
             category = "roofs"
         elif name.startswith("FLR_") or name.startswith("Base_"):
             category = "floors"
@@ -2850,19 +3039,115 @@ def _collection_bbox_and_center(col):
     return (mn, mx), (mn + mx) * 0.5
 
 
-def _pick_decal_category(manifest, rng):
-    cats = []
-    if DECAL_ENABLE_STREAKS and manifest.get('streaks'):
-        cats.append('streaks')
-    if DECAL_ENABLE_GRIME and manifest.get('grime'):
-        cats.append('grime')
-    if DECAL_ENABLE_CRACKS and manifest.get('cracks'):
-        cats.append('cracks')
-    if DECAL_ENABLE_CORNER_DIRT and manifest.get('corner_dirt'):
-        cats.append('corner_dirt')
-    if DECAL_ENABLE_EDGE_DIRT and manifest.get('edge_dirt'):
-        cats.append('edge_dirt')
-    return rng.choice(cats) if cats else None
+def _normalize_under_roof_region(entry, idx, default_width_px=216, default_height_px=216, default_height_m=0.5):
+    if not isinstance(entry, dict):
+        return None
+
+    def _to_int(value, fallback=None):
+        try:
+            if value is None:
+                return fallback
+            iv = int(value)
+            return iv
+        except Exception:
+            return fallback
+
+    x = _to_int(entry.get("x"), 0)
+    y = _to_int(entry.get("y"), 0)
+
+    width_candidates = [
+        entry.get("w"),
+        entry.get("width"),
+        entry.get("tile_px_w"),
+        entry.get("g"),
+    ]
+    w = None
+    for candidate in width_candidates:
+        w = _to_int(candidate, None)
+        if w and w > 0:
+            break
+    if not w or w <= 0:
+        w = default_width_px
+
+    height_candidates = [
+        entry.get("h"),
+        entry.get("height"),
+        entry.get("tile_px_h"),
+    ]
+    h = None
+    for candidate in height_candidates:
+        h = _to_int(candidate, None)
+        if h and h > 0:
+            break
+    if not h or h <= 0:
+        h = default_height_px
+
+    tile_width_m = float(entry.get("tile_width_m", 1.0) or 1.0)
+
+    height_m_candidates = [
+        entry.get("decal_height_m"),
+        entry.get("height_m"),
+        entry.get("tile_height_m"),
+    ]
+    tile_height_m = None
+    for candidate in height_m_candidates:
+        try:
+            if candidate is None:
+                continue
+            fv = float(candidate)
+            if fv > 0.0:
+                tile_height_m = fv
+                break
+        except Exception:
+            continue
+    if tile_height_m is None:
+        tile_height_m = float(default_height_m if default_height_m and default_height_m > 0.0 else 0.5)
+
+    return {
+        "id": str(entry.get("id", f"under_roof_{idx:02d}")),
+        "x": x,
+        "y": y,
+        "w": w,
+        "h": h,
+        "tile_width_m": tile_width_m,
+        "tile_height_m": tile_height_m,
+    }
+
+
+def _under_roof_regions_from_manifest(manifest):
+    raw_entries = []
+    default_height_m = 0.5
+    if isinstance(manifest, dict):
+        meta = manifest.get("meta", {}) if isinstance(manifest.get("meta"), dict) else {}
+        for candidate in [
+            meta.get("under_roof_decal_height_m"),
+            meta.get("decal_height_m"),
+            manifest.get("under_roof_decal_height_m"),
+            manifest.get("decal_height_m"),
+        ]:
+            try:
+                if candidate is None:
+                    continue
+                fv = float(candidate)
+                if fv > 0.0:
+                    default_height_m = fv
+                    break
+            except Exception:
+                continue
+
+        if isinstance(manifest.get("under_roof_drips"), list):
+            raw_entries = manifest.get("under_roof_drips", [])
+        elif isinstance(manifest.get("roof_drips"), list):
+            raw_entries = manifest.get("roof_drips", [])
+        elif isinstance(manifest.get("streaks"), list):
+            raw_entries = manifest.get("streaks", [])
+
+    regions = []
+    for idx, entry in enumerate(raw_entries):
+        region = _normalize_under_roof_region(entry, idx, default_height_m=default_height_m)
+        if region is not None:
+            regions.append(region)
+    return regions
 
 
 def _wall_decal_world_basis(wall_obj, center):
@@ -2886,39 +3171,25 @@ def _wall_decal_world_basis(wall_obj, center):
     return thin_x, wall_span, tangent_world, up_world, normal_world
 
 
-def _create_wall_decal_plane(target_col, wall_obj, region, atlas_w, atlas_h, image, category, seed_tag, center):
+def _create_wall_decal_plane(target_col, wall_obj, region, atlas_w, atlas_h, image, category, seed_tag, center, *, width_override=None, height_override=None, anchor_top_z=None, tangent_offset=0.0):
     dims = wall_obj.dimensions
     eps = 0.03
-    rng = random.Random(abs(hash(seed_tag)))
     thin_x, wall_span, tangent_world, up_world, normal_world = _wall_decal_world_basis(wall_obj, center)
+
+    width = float(width_override if width_override is not None else max(region.get("tile_width_m", 1.0), 0.2))
+    height = float(height_override if height_override is not None else max(region.get("tile_height_m", 1.0), 0.2))
+
+    if anchor_top_z is None:
+        anchor_top_z = wall_obj.location.z + dims.z * 0.5
+    z_center = anchor_top_z - height * 0.5
+
     loc = wall_obj.location.copy()
     rot_basis = Matrix((tangent_world, up_world, normal_world)).transposed()
     rot = rot_basis.to_euler('XYZ')
-    width = max(wall_span, 0.2)
-    height = max(dims.z, 0.2)
-    if category == 'ground_strips':
-        height = min(height * 0.35, max(0.4, region.get('tile_height_m', 1.0)))
-        z_center = wall_obj.location.z - dims.z * 0.5 + height * 0.5 + 0.01
-    else:
-        target_h = min(height * rng.uniform(0.28, 0.65), max(0.5, region.get('tile_height_m', 1.0)))
-        height = target_h
-        z_min = wall_obj.location.z - dims.z * 0.5 + height * 0.5 + 0.05
-        z_max = wall_obj.location.z + dims.z * 0.5 - height * 0.5 - 0.05
-        z_center = (z_min + z_max) * 0.5 if z_max <= z_min else rng.uniform(z_min, z_max)
-    width = min(width * rng.uniform(0.35, 0.95), max(0.3, region.get('tile_width_m', width)))
-    lateral = 0.0
-    max_lateral = max((dims.y if thin_x else dims.x) - width, 0.0) * 0.5
-    if max_lateral > 0.01:
-        lateral = rng.uniform(-max_lateral, max_lateral)
 
-    if thin_x:
-        loc.x += normal_world.x * (dims.x * 0.5 + eps)
-        loc.y += lateral
-        loc.z = z_center
-    else:
-        loc.y += normal_world.y * (dims.y * 0.5 + eps)
-        loc.x += lateral
-        loc.z = z_center
+    loc += tangent_world * tangent_offset
+    loc += normal_world * ((dims.x * 0.5 if thin_x else dims.y * 0.5) + eps)
+    loc.z = z_center
 
     bpy.ops.mesh.primitive_plane_add(location=loc, rotation=rot)
     obj = bpy.context.active_object
@@ -2948,6 +3219,7 @@ def apply_decals_stage1(collection_name: str, seed_value: int):
         _debug_log(f"Decal manifest not found: {DECAL_MANIFEST_PATH}")
         print('[Decal] Manifest not found, skipping decals.')
         return
+
     meta = manifest.get('meta', {})
     atlas_w = meta.get('atlas_width', 1024)
     atlas_h = meta.get('atlas_height', 1024)
@@ -2958,10 +3230,12 @@ def apply_decals_stage1(collection_name: str, seed_value: int):
         _debug_log(f"Decal image not found: {img_path}")
         print('[Decal] Image not found, skipping decals.')
         return
+
     col = bpy.data.collections.get(collection_name)
     if col is None:
         _debug_log(f"Collection not found: {collection_name}")
         return
+
     bbox, center = _collection_bbox_and_center(col)
     if bbox is None:
         _debug_log('Collection bbox is empty, skipping decals.')
@@ -2974,45 +3248,98 @@ def apply_decals_stage1(collection_name: str, seed_value: int):
         if obj.get('is_decal'):
             bpy.data.objects.remove(obj, do_unlink=True)
 
-    rng = random.Random(seed_value + 99173)
     walls = _resolve_decal_walls(col)
-    _debug_log(f"Candidate walls: {len(walls)}")
+    regions = _under_roof_regions_from_manifest(manifest)
+    if not DECAL_ENABLE_STREAKS or not regions:
+        _debug_log('Under-roof drips disabled or manifest has no valid under_roof_drips/streaks entries.')
+        print('[Decal] Under-roof drips disabled or no valid entries found.')
+        return
+
+    rng = random.Random(seed_value + 99173)
+    tile_width_m = 1.0
     created_count = 0
+
+    _debug_log(f"Candidate walls before top-band filter: {len(walls)}")
+    _debug_log(f"Under-roof regions: {len(regions)}")
+
+    wall_infos = []
+    top_bands = {}
+    band_step = 0.1
     for wall in walls:
         dims = wall.dimensions
-        _debug_log(f"Wall {wall.name}: dims=({dims.x:.3f}, {dims.y:.3f}, {dims.z:.3f})")
         if dims.z < 0.5 or min(dims.x, dims.y) > max(dims.x, dims.y) * 0.75:
-            _debug_log('  skip geometry filter')
+            _debug_log(f"Wall {wall.name}: skip geometry filter")
             continue
-        roll = rng.random()
-        threshold = min(1.0, DECAL_DENSITY)
-        if DECAL_DENSITY <= 0.0 or roll > threshold:
-            _debug_log(f"  skip density roll={roll:.3f} threshold={threshold:.3f}")
-            continue
-        category = _pick_decal_category(manifest, rng)
-        _debug_log(f"  picked category={category}")
-        if category:
-            entries = manifest.get(category, [])
-            if entries:
-                region = entries[abs(hash(f'{wall.name}:{category}:{seed_value}')) % len(entries)]
-                _create_wall_decal_plane(decal_col, wall, region, atlas_w, atlas_h, image, category, f'{seed_value}:{wall.name}:{category}', center)
-                created_count += 1
-                _debug_log(f"  created decal category={category} tile={region.get('id', '<no-id>')}")
-        if DECAL_ENABLE_GROUND_STRIPS and manifest.get('ground_strips'):
-            grow_roll = rng.random()
-            grow_threshold = min(1.0, DECAL_DENSITY + 0.2)
-            if grow_roll < grow_threshold:
-                entries = manifest.get('ground_strips', [])
-                if entries:
-                    region = entries[abs(hash(f'{wall.name}:ground:{seed_value}')) % len(entries)]
-                    _create_wall_decal_plane(decal_col, wall, region, atlas_w, atlas_h, image, 'ground_strips', f'{seed_value}:{wall.name}:ground', center)
-                    created_count += 1
-                    _debug_log(f"  created decal category=ground_strips tile={region.get('id', '<no-id>')}")
-            else:
-                _debug_log(f"  skip ground strip roll={grow_roll:.3f} threshold={grow_threshold:.3f}")
+        _, wall_span, _, _, _ = _wall_decal_world_basis(wall, center)
+        wall_top_z = wall.location.z + dims.z * 0.5
+        band_key = round(wall_top_z / band_step) * band_step
+        info = {
+            'wall': wall,
+            'dims': dims,
+            'wall_span': wall_span,
+            'wall_top_z': wall_top_z,
+            'band_key': band_key,
+        }
+        wall_infos.append(info)
+        top_bands[band_key] = top_bands.get(band_key, 0.0) + wall_span
+
+    if not wall_infos:
+        _debug_log('No walls left after geometry filter.')
+        print('[Decal] No suitable walls for under-roof drips.')
+        return
+
+    strongest_band_span = max(top_bands.values()) if top_bands else 0.0
+    valid_band_keys = {
+        key for key, total_span in top_bands.items()
+        if total_span >= max(2.0, strongest_band_span * 0.35)
+    }
+    wall_infos = [info for info in wall_infos if info['band_key'] in valid_band_keys]
+
+    _debug_log(f"Top bands: {sorted((round(k,3), round(v,3)) for k,v in top_bands.items())}")
+    _debug_log(f"Valid top bands: {sorted(round(v,3) for v in valid_band_keys)}")
+    _debug_log(f"Candidate walls after top-band filter: {len(wall_infos)}")
+
+    for info in wall_infos:
+        wall = info['wall']
+        dims = info['dims']
+        wall_span = info['wall_span']
+        wall_top_z = info['wall_top_z']
+        tile_count = max(1, int(math.floor((wall_span + 1e-6) / tile_width_m)))
+        used_span = tile_count * tile_width_m
+        start_offset = -used_span * 0.5 + tile_width_m * 0.5
+
+        _debug_log(f"Wall {wall.name}: span={wall_span:.3f}m, tile_count={tile_count}, top_z={wall_top_z:.3f}")
+
+        for tile_index in range(tile_count):
+            tangent_offset = start_offset + tile_index * tile_width_m
+            region = rng.choice(regions)
+            width_world = tile_width_m
+            requested_height_world = float(region.get("tile_height_m", 0.5) or 0.5)
+            height_world = min(requested_height_world, max(0.05, dims.z - 0.02))
+
+            obj = _create_wall_decal_plane(
+                decal_col,
+                wall,
+                region,
+                atlas_w,
+                atlas_h,
+                image,
+                'under_roof_drips',
+                f'{seed_value}:{wall.name}:under_roof:{tile_index}:{region.get("id", "tile")}',
+                center,
+                width_override=width_world,
+                height_override=height_world,
+                anchor_top_z=wall_top_z,
+                tangent_offset=tangent_offset,
+            )
+            obj['decal_anchor'] = 'roof_bottom'
+            obj['decal_tile_width_m'] = width_world
+            obj['decal_fixed_height_m'] = height_world
+            created_count += 1
+            _debug_log(f"  created under-roof drip wall={wall.name} tile={tile_index} region={region.get('id', '<no-id>')} offset={tangent_offset:.3f}")
 
     _debug_log(f"Decals assigned total: {created_count}")
-    print(f'[Decal] Decals assigned: {created_count}')
+    print(f'[Decal] Under-roof drips assigned: {created_count}')
 
 
 def generate():
@@ -3084,6 +3411,7 @@ def generate():
         current_patches = footprint_rects_from_layout(spec["rooms"], spec["corridor"], open_void=spec.get("open_void"))
         next_patches = footprint_rects_from_layout(next_spec["rooms"], next_spec["corridor"], open_void=next_spec.get("open_void")) if next_spec is not None else None
         add_roof_patches(col, current_patches, z_offset, next_patches=next_patches, opening_rect=opening_rect, open_void=spec.get("open_void"))
+        add_floor_seam_bands(col, current_patches, z_offset)
 
         inherited_void = spec["stair"].rect if spec["stair"] is not None else None
 
@@ -3173,6 +3501,16 @@ _DEFAULTS = {
     "MODULAR_TILES_ENABLED": MODULAR_TILES_ENABLED,
     "WALL_TILE_WIDTH": WALL_TILE_WIDTH,
     "SURFACE_TILE_SIZE": SURFACE_TILE_SIZE,
+    "ROOF_BORDER_ENABLED": ROOF_BORDER_ENABLED,
+    "ROOF_BORDER_WIDTH": ROOF_BORDER_WIDTH,
+    "ROOF_BORDER_HEIGHT": ROOF_BORDER_HEIGHT,
+    "ROOF_BORDER_TILE_CATEGORY": ROOF_BORDER_TILE_CATEGORY,
+    "ROOF_BORDER_TILE_ID": ROOF_BORDER_TILE_ID,
+    "FLOOR_BAND_ENABLED": FLOOR_BAND_ENABLED,
+    "FLOOR_BAND_DEPTH": FLOOR_BAND_DEPTH,
+    "FLOOR_BAND_HEIGHT": FLOOR_BAND_HEIGHT,
+    "FLOOR_BAND_TILE_CATEGORY": FLOOR_BAND_TILE_CATEGORY,
+    "FLOOR_BAND_TILE_ID": FLOOR_BAND_TILE_ID,
 }
 
 
@@ -3194,6 +3532,8 @@ def apply_settings(settings: dict):
     global ATLAS_ENABLED, ATLAS_MANIFEST_PATH, ATLAS_IMAGE_PATH, ATLAS_INCLUDE_INTERIOR_WALLS, ATLAS_RANDOM_PICK
     global DECALS_ENABLED, DECAL_MANIFEST_PATH, DECAL_IMAGE_PATH, DECAL_DENSITY, DECAL_ENABLE_STREAKS, DECAL_ENABLE_GRIME, DECAL_ENABLE_GROUND_STRIPS, DECAL_ENABLE_CRACKS, DECAL_ENABLE_CORNER_DIRT, DECAL_ENABLE_EDGE_DIRT, DEBUG_LOG_ENABLED
     global MODULAR_TILES_ENABLED, WALL_TILE_WIDTH, SURFACE_TILE_SIZE
+    global ROOF_BORDER_ENABLED, ROOF_BORDER_WIDTH, ROOF_BORDER_HEIGHT, ROOF_BORDER_TILE_CATEGORY, ROOF_BORDER_TILE_ID
+    global FLOOR_BAND_ENABLED, FLOOR_BAND_DEPTH, FLOOR_BAND_HEIGHT, FLOOR_BAND_TILE_CATEGORY, FLOOR_BAND_TILE_ID
 
     for key, value in settings.items():
         if key in globals():
@@ -3202,6 +3542,10 @@ def apply_settings(settings: dict):
     FLOOR_TO_FLOOR_HEIGHT = WALL_HEIGHT + FLOOR_THICKNESS
     WALL_TILE_WIDTH = max(0.05, WALL_TILE_WIDTH)
     SURFACE_TILE_SIZE = max(0.05, SURFACE_TILE_SIZE)
+    ROOF_BORDER_WIDTH = max(0.01, ROOF_BORDER_WIDTH)
+    ROOF_BORDER_HEIGHT = max(0.01, ROOF_BORDER_HEIGHT)
+    FLOOR_BAND_DEPTH = max(0.01, FLOOR_BAND_DEPTH)
+    FLOOR_BAND_HEIGHT = max(0.01, FLOOR_BAND_HEIGHT)
     STRICT_EDGE_TOL = max(WALL_THICKNESS * 0.75, 0.22)
 
 
