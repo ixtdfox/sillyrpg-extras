@@ -2517,13 +2517,13 @@ def _point_in_any_rect(px: float, py: float, rects: List[Rect], margin: float = 
     return False
 
 
-def _add_tiled_linear_trim(col, name_prefix: str, runs, z_center: float, vertical_size: float, side_size: float, *, inward=True, atlas_category="walls", atlas_tile_id="", source_rects: Optional[List[Rect]] = None):
+def _add_tiled_linear_trim(col, name_prefix: str, runs, z_center: float, vertical_size: float, side_size: float, *, inward=True, atlas_category="walls", atlas_tile_id="", source_rects: Optional[List[Rect]] = None, align_to_wall_outer_face: bool = True):
     tile_len = 1.0
     created = []
     vertical_size = max(0.01, float(vertical_size))
     side_size = max(0.01, float(side_size))
     source_rects = source_rects or []
-    probe = max(0.02, side_size * 0.6)
+    probe = max(0.02, max(side_size, WALL_THICKNESS) * 0.6)
     for run_idx, (orientation, fixed, start, end) in enumerate(runs):
         parts = _split_length_into_tiles(end - start, tile_len, keep_uniform=True)
         axis_start = start
@@ -2541,14 +2541,18 @@ def _add_tiled_linear_trim(col, name_prefix: str, runs, z_center: float, vertica
         else:
             dir_sign = 1.0
 
+        side_offset = dir_sign * side_size * 0.5
+        if align_to_wall_outer_face:
+            side_offset = dir_sign * ((WALL_THICKNESS * 0.5) - (side_size * 0.5))
+
         for tile_idx, (offset, seg_len) in enumerate(parts):
             center_axis = axis_start + offset
             if orientation == "H":
                 x = center_axis
-                y = fixed + dir_sign * side_size * 0.5
+                y = fixed + side_offset
                 obj = add_box(col, f"{name_prefix}_{run_idx}_{tile_idx}", x, y, z_center, seg_len, side_size, vertical_size)
             else:
-                x = fixed + dir_sign * side_size * 0.5
+                x = fixed + side_offset
                 y = center_axis
                 obj = add_box(col, f"{name_prefix}_{run_idx}_{tile_idx}", x, y, z_center, side_size, seg_len, vertical_size)
 
@@ -2560,11 +2564,13 @@ def _add_tiled_linear_trim(col, name_prefix: str, runs, z_center: float, vertica
 
 
 def add_roof_borders(col, roof_patches: List[Rect], z_offset: float):
-    if not ROOF_BORDER_ENABLED or not roof_patches:
+    if not ROOF_BORDER_ENABLED:
         return []
+    perimeter_rects = [Rect(0.0, 0.0, HOUSE_WIDTH, HOUSE_DEPTH)]
     roof_z = z_offset + WALL_HEIGHT + FLOOR_THICKNESS * 0.5
-    top_z = roof_z + FLOOR_THICKNESS * 0.5 + ROOF_BORDER_HEIGHT * 0.5
-    runs = _boundary_runs_from_rects(roof_patches, unit=1.0)
+    # Continue the wall upward: the border starts at the wall top and extends above it.
+    top_z = z_offset + WALL_HEIGHT + ROOF_BORDER_HEIGHT * 0.5
+    runs = _boundary_runs_from_rects(perimeter_rects, unit=1.0)
     return _add_tiled_linear_trim(
         col,
         f"RoofBorder_{int(z_offset*1000)}",
@@ -2575,15 +2581,19 @@ def add_roof_borders(col, roof_patches: List[Rect], z_offset: float):
         inward=True,
         atlas_category=ROOF_BORDER_TILE_CATEGORY,
         atlas_tile_id=ROOF_BORDER_TILE_ID,
-        source_rects=roof_patches,
+        source_rects=perimeter_rects,
+        align_to_wall_outer_face=True,
     )
 
 
 def add_floor_seam_bands(col, footprint_rects: List[Rect], z_offset: float):
-    if not FLOOR_BAND_ENABLED or not footprint_rects or z_offset <= EPS:
+    if not FLOOR_BAND_ENABLED or z_offset <= EPS:
         return []
+    perimeter_rects = [Rect(0.0, 0.0, HOUSE_WIDTH, HOUSE_DEPTH)]
+    # Make the band read as a continuation/cover strip of the seam rather than a hanging piece.
+    # Center it on the seam line so it covers the joint without leaving a gap above.
     seam_z = z_offset - FLOOR_THICKNESS * 0.5
-    runs = _boundary_runs_from_rects(footprint_rects, unit=1.0)
+    runs = _boundary_runs_from_rects(perimeter_rects, unit=1.0)
     return _add_tiled_linear_trim(
         col,
         f"FloorBand_{int(z_offset*1000)}",
@@ -2591,10 +2601,11 @@ def add_floor_seam_bands(col, footprint_rects: List[Rect], z_offset: float):
         seam_z,
         FLOOR_BAND_HEIGHT,
         FLOOR_BAND_DEPTH,
-        inward=False,
+        inward=True,
         atlas_category=FLOOR_BAND_TILE_CATEGORY,
         atlas_tile_id=FLOOR_BAND_TILE_ID,
-        source_rects=footprint_rects,
+        source_rects=perimeter_rects,
+        align_to_wall_outer_face=True,
     )
 
 def add_roof_patches(col, current_patches: List[Rect], z_offset: float, next_patches: Optional[List[Rect]] = None, opening_rect: Optional[Rect] = None, open_void: Optional[Rect] = None):

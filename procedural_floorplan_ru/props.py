@@ -247,12 +247,12 @@ class FloorplanSettings(bpy.types.PropertyGroup):
     roof_border_enabled: BoolProperty(name="Бортики по крыше", description="Добавлять по внешнему периметру крыши бортики из 1-метровых тайлов", default=DEFAULTS["ROOF_BORDER_ENABLED"])
     roof_border_width: FloatProperty(name="Толщина бортика", description="Толщина бортика по крыше в метрах", default=DEFAULTS["ROOF_BORDER_WIDTH"], min=0.01, soft_max=1.0)
     roof_border_height: FloatProperty(name="Высота бортика", description="Высота бортика по крыше в метрах", default=DEFAULTS["ROOF_BORDER_HEIGHT"], min=0.01, soft_max=1.0)
-    roof_border_tile_category: EnumProperty(name="Категория текстуры бортика", description="Категория тайла из общего atlas manifest.json для бортиков крыши", items=atlas_manifest.category_items, default=DEFAULTS["ROOF_BORDER_TILE_CATEGORY"])
+    roof_border_tile_category: EnumProperty(name="Категория текстуры бортика", description="Категория тайла из общего atlas manifest.json для бортиков крыши", items=atlas_manifest.ATLAS_CATEGORIES, default=DEFAULTS["ROOF_BORDER_TILE_CATEGORY"])
     roof_border_tile_id: StringProperty(name="ID тайла бортика", description="Какой id тайла использовать для бортиков крыши. Если пусто, будет случайный выбор внутри категории", default=DEFAULTS["ROOF_BORDER_TILE_ID"])
     floor_band_enabled: BoolProperty(name="Межэтажные балки", description="Добавлять горизонтальные балки по внешнему шву между этажами", default=DEFAULTS["FLOOR_BAND_ENABLED"])
     floor_band_depth: FloatProperty(name="Толщина балки", description="Насколько балка выступает от стены наружу, в метрах", default=DEFAULTS["FLOOR_BAND_DEPTH"], min=0.01, soft_max=1.0)
     floor_band_height: FloatProperty(name="Высота балки", description="Высота межэтажной балки в метрах", default=DEFAULTS["FLOOR_BAND_HEIGHT"], min=0.01, soft_max=1.0)
-    floor_band_tile_category: EnumProperty(name="Категория текстуры балки", description="Категория тайла из общего atlas manifest.json для межэтажных балок", items=atlas_manifest.category_items, default=DEFAULTS["FLOOR_BAND_TILE_CATEGORY"])
+    floor_band_tile_category: EnumProperty(name="Категория текстуры балки", description="Категория тайла из общего atlas manifest.json для межэтажных балок", items=atlas_manifest.ATLAS_CATEGORIES, default=DEFAULTS["FLOOR_BAND_TILE_CATEGORY"])
     floor_band_tile_id: StringProperty(name="ID тайла балки", description="Какой id тайла использовать для межэтажных балок. Если пусто, будет случайный выбор внутри категории", default=DEFAULTS["FLOOR_BAND_TILE_ID"])
 
 
@@ -266,6 +266,10 @@ def register():
 
 
 def unregister():
-    del bpy.types.Scene.floorplan_ru_settings
+    if hasattr(bpy.types.Scene, "floorplan_ru_settings"):
+        del bpy.types.Scene.floorplan_ru_settings
     for cls in reversed(classes):
-        bpy.utils.unregister_class(cls)
+        try:
+            bpy.utils.unregister_class(cls)
+        except RuntimeError:
+            pass
