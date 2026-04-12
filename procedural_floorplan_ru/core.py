@@ -3278,8 +3278,13 @@ def apply_decals_stage1(collection_name: str, seed_value: int):
     band_step = 0.1
     for wall in walls:
         dims = wall.dimensions
-        if dims.z < 0.5 or min(dims.x, dims.y) > max(dims.x, dims.y) * 0.75:
-            _debug_log(f"Wall {wall.name}: skip geometry filter")
+        wall_span_guess = max(dims.x, dims.y)
+        wall_thickness_guess = min(dims.x, dims.y)
+        # Do not drop short top strips above windows: they still belong to the
+        # upper facade band and must receive under-roof drips. We only filter
+        # out near-square pieces and extremely tiny wall fragments.
+        if wall_span_guess < 0.2 or dims.z < 0.08 or wall_thickness_guess > wall_span_guess * 0.75:
+            _debug_log(f"Wall {wall.name}: skip geometry filter span={wall_span_guess:.3f} z={dims.z:.3f} thick={wall_thickness_guess:.3f}")
             continue
         _, wall_span, _, _, _ = _wall_decal_world_basis(wall, center)
         wall_top_z = wall.location.z + dims.z * 0.5
