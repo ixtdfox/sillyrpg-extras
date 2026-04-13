@@ -13,6 +13,7 @@ ATLAS_CATEGORIES = [
     ("roofs", "roofs", "Крыши"),
     ("roof_borders", "roof_borders", "Бортики крыши"),
     ("floor_bands", "floor_bands", "Межэтажные балки"),
+    ("railings", "railings", "Перила"),
     ("stairs", "stairs", "Ступени"),
     ("stair_landings", "stair_landings", "Лестничные площадки"),
 ]

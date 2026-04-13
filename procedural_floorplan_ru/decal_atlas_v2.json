@@ -1,0 +1,17 @@
+{
+  "meta": {
+    "atlas_width": 1024,
+    "atlas_height": 1536,
+    "source_image": "//a_decal_atlas_texture_image_consists_of_18_separat.png",
+    "version": 2,
+    "mode": "under_roof_drips_only",
+    "under_roof_decal_height_m": 0.25
+  },
+  "under_roof_drips": [
+    { "id": "under_roof_01", "x": 0,   "y": 0,  "width": 316, "height": 318 },
+    { "id": "under_roof_02", "x": 316, "y": 0,    "width": 158, "height": 318 },
+    { "id": "under_roof_03", "x": 474, "y": 0,  "width": 364, "height": 318 },
+    { "id": "under_roof_04", "x": 0, "y": 318,  "width": 362, "height": 318 },
+    { "id": "under_roof_04", "x": 362, "y": 318,  "width": 362, "height": 318 }
+  ]
+}

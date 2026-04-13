@@ -68,6 +68,17 @@ class FLOORPLAN_PT_panel(bpy.types.Panel):
         band_col.prop(props, "floor_band_tile_category")
         band_col.prop(props, "floor_band_tile_id")
 
+        rail_box = trim_box.box()
+        rail_box.prop(props, "railings_enabled")
+        rail_col = rail_box.column(align=True)
+        rail_col.enabled = props.railings_enabled
+        rail_col.prop(props, "railing_height")
+        rail_col.prop(props, "railing_post_size")
+        rail_col.prop(props, "railing_rail_thickness")
+        rail_col.prop(props, "railing_rail_count")
+        rail_col.prop(props, "railing_tile_category")
+        rail_col.prop(props, "railing_tile_id")
+
         box = layout.box()
         box.label(text="Окна")
         col = box.column(align=True)

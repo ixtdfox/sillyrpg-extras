@@ -22,6 +22,7 @@ SETTING_NAMES = [
     "modular_tiles_enabled", "wall_tile_width", "surface_tile_size",
     "roof_border_enabled", "roof_border_width", "roof_border_height", "roof_border_tile_category", "roof_border_tile_id",
     "floor_band_enabled", "floor_band_depth", "floor_band_height", "floor_band_tile_category", "floor_band_tile_id",
+    "railings_enabled", "railing_height", "railing_post_size", "railing_rail_thickness", "railing_rail_count", "railing_tile_category", "railing_tile_id",
 ]
 
 KEY_MAP = {
@@ -103,6 +104,13 @@ KEY_MAP = {
     "floor_band_height": "FLOOR_BAND_HEIGHT",
     "floor_band_tile_category": "FLOOR_BAND_TILE_CATEGORY",
     "floor_band_tile_id": "FLOOR_BAND_TILE_ID",
+    "railings_enabled": "RAILINGS_ENABLED",
+    "railing_height": "RAILING_HEIGHT",
+    "railing_post_size": "RAILING_POST_SIZE",
+    "railing_rail_thickness": "RAILING_RAIL_THICKNESS",
+    "railing_rail_count": "RAILING_RAIL_COUNT",
+    "railing_tile_category": "RAILING_TILE_CATEGORY",
+    "railing_tile_id": "RAILING_TILE_ID",
 }
 
 

@@ -120,6 +120,13 @@ def apply_defaults_to_props(props):
     props.floor_band_height = DEFAULTS["FLOOR_BAND_HEIGHT"]
     props.floor_band_tile_category = DEFAULTS["FLOOR_BAND_TILE_CATEGORY"]
     props.floor_band_tile_id = DEFAULTS["FLOOR_BAND_TILE_ID"]
+    props.railings_enabled = DEFAULTS["RAILINGS_ENABLED"]
+    props.railing_height = DEFAULTS["RAILING_HEIGHT"]
+    props.railing_post_size = DEFAULTS["RAILING_POST_SIZE"]
+    props.railing_rail_thickness = DEFAULTS["RAILING_RAIL_THICKNESS"]
+    props.railing_rail_count = DEFAULTS["RAILING_RAIL_COUNT"]
+    props.railing_tile_category = DEFAULTS["RAILING_TILE_CATEGORY"]
+    props.railing_tile_id = DEFAULTS["RAILING_TILE_ID"]
 
 
 class FloorplanSettings(bpy.types.PropertyGroup):
@@ -254,6 +261,13 @@ class FloorplanSettings(bpy.types.PropertyGroup):
     floor_band_height: FloatProperty(name="Высота балки", description="Высота межэтажной балки в метрах", default=DEFAULTS["FLOOR_BAND_HEIGHT"], min=0.01, soft_max=1.0)
     floor_band_tile_category: EnumProperty(name="Категория текстуры балки", description="Категория тайла из общего atlas manifest.json для межэтажных балок", items=atlas_manifest.ATLAS_CATEGORIES, default=DEFAULTS["FLOOR_BAND_TILE_CATEGORY"])
     floor_band_tile_id: StringProperty(name="ID тайла балки", description="Какой id тайла использовать для межэтажных балок. Если пусто, будет случайный выбор внутри категории", default=DEFAULTS["FLOOR_BAND_TILE_ID"])
+    railings_enabled: BoolProperty(name="Перила", description="Добавлять ограждение по внешнему периметру крыши", default=DEFAULTS["RAILINGS_ENABLED"])
+    railing_height: FloatProperty(name="Высота перил", description="Общая высота перил от верха стены", default=DEFAULTS["RAILING_HEIGHT"], min=0.3, soft_max=2.0)
+    railing_post_size: FloatProperty(name="Толщина стойки", description="Сечение вертикальных стоек перил", default=DEFAULTS["RAILING_POST_SIZE"], min=0.02, soft_max=0.3)
+    railing_rail_thickness: FloatProperty(name="Толщина перекладины", description="Толщина горизонтальных перекладин", default=DEFAULTS["RAILING_RAIL_THICKNESS"], min=0.01, soft_max=0.2)
+    railing_rail_count: IntProperty(name="Кол-во перекладин", description="Сколько горизонтальных перекладин строить по высоте", default=DEFAULTS["RAILING_RAIL_COUNT"], min=1, soft_max=6)
+    railing_tile_category: EnumProperty(name="Категория текстуры перил", description="Категория тайла из общего atlas manifest.json для перил", items=atlas_manifest.ATLAS_CATEGORIES, default=DEFAULTS["RAILING_TILE_CATEGORY"])
+    railing_tile_id: StringProperty(name="ID тайла перил", description="Какой id тайла использовать для перил. Если пусто, будет случайный выбор внутри категории", default=DEFAULTS["RAILING_TILE_ID"])
 
 
 classes = (FloorplanSettings,)

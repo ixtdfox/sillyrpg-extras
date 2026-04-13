@@ -81,14 +81,22 @@ SURFACE_TILE_SIZE = 1.0
 ROOF_BORDER_ENABLED = True
 ROOF_BORDER_WIDTH = 0.2
 ROOF_BORDER_HEIGHT = 0.2
-ROOF_BORDER_TILE_CATEGORY = "walls"
+ROOF_BORDER_TILE_CATEGORY = "roof_borders"
 ROOF_BORDER_TILE_ID = ""
 
 FLOOR_BAND_ENABLED = True
 FLOOR_BAND_DEPTH = 0.1
 FLOOR_BAND_HEIGHT = 0.1
-FLOOR_BAND_TILE_CATEGORY = "walls"
+FLOOR_BAND_TILE_CATEGORY = "floor_bands"
 FLOOR_BAND_TILE_ID = ""
+
+RAILINGS_ENABLED = False
+RAILING_HEIGHT = 1.1
+RAILING_POST_SIZE = 0.06
+RAILING_RAIL_THICKNESS = 0.04
+RAILING_RAIL_COUNT = 3
+RAILING_TILE_CATEGORY = "railings"
+RAILING_TILE_ID = ""
 
 # creative: upper floors may have different footprints
 # strict: every floor is scaled to match the 1st floor footprint exactly
@@ -2608,6 +2616,156 @@ def add_floor_seam_bands(col, footprint_rects: List[Rect], z_offset: float):
         align_to_wall_outer_face=True,
     )
 
+def add_roof_railings(col, z_offset: float):
+    if not RAILINGS_ENABLED:
+        return []
+    perimeter_rects = [Rect(0.0, 0.0, HOUSE_WIDTH, HOUSE_DEPTH)]
+    runs = _boundary_runs_from_rects(perimeter_rects, unit=1.0)
+    created = []
+    post = max(0.02, float(RAILING_POST_SIZE))
+    rail_t = max(0.01, float(RAILING_RAIL_THICKNESS))
+    rail_h = max(0.35, float(RAILING_HEIGHT))
+    rail_count = max(1, int(RAILING_RAIL_COUNT))
+    base_z = z_offset + WALL_HEIGHT + rail_h * 0.5
+    source_rects = perimeter_rects
+    probe = max(0.02, max(post, WALL_THICKNESS) * 0.6)
+
+    def _side_sign(orientation, fixed, start, end):
+        mid_axis = (start + end) * 0.5
+        if orientation == "H":
+            inside_pos = _point_in_any_rect(mid_axis, fixed + probe, source_rects)
+            inside_neg = _point_in_any_rect(mid_axis, fixed - probe, source_rects)
+        else:
+            inside_pos = _point_in_any_rect(fixed + probe, mid_axis, source_rects)
+            inside_neg = _point_in_any_rect(fixed - probe, mid_axis, source_rects)
+        if inside_pos and not inside_neg:
+            return 1.0
+        if inside_neg and not inside_pos:
+            return -1.0
+        return 1.0
+
+    def _post_xy(orientation, fixed, axis_value, side_offset):
+        if orientation == "H":
+            return axis_value, fixed + side_offset
+        return fixed + side_offset, axis_value
+
+    levels = []
+    if rail_count == 1:
+        levels = [max(rail_t * 0.5, rail_h - rail_t * 0.5)]
+    else:
+        bottom = min(0.35, rail_h * 0.35)
+        top = rail_h - (rail_t * 0.5)
+        span = max(0.05, top - bottom)
+        levels = [bottom + span * (i / (rail_count - 1)) for i in range(rail_count)]
+
+    # Precompute side offsets for rectangle borders so each outer corner gets exactly one shared post.
+    h_offsets = {}
+    v_offsets = {}
+    for orientation, fixed, start, end in runs:
+        side_sign = _side_sign(orientation, fixed, start, end)
+        side_offset = side_sign * ((WALL_THICKNESS * 0.5) - (post * 0.5))
+        key = round(fixed, 6)
+        if orientation == "H":
+            h_offsets[key] = side_offset
+        else:
+            v_offsets[key] = side_offset
+
+    min_x = 0.0
+    max_x = HOUSE_WIDTH
+    min_y = 0.0
+    max_y = HOUSE_DEPTH
+
+    def _corner_xy(axis_x, axis_y):
+        if abs(axis_x - min_x) <= EPS:
+            x = min_x + v_offsets.get(round(min_x, 6), 0.0)
+        else:
+            x = max_x + v_offsets.get(round(max_x, 6), 0.0)
+        if abs(axis_y - min_y) <= EPS:
+            y = min_y + h_offsets.get(round(min_y, 6), 0.0)
+        else:
+            y = max_y + h_offsets.get(round(max_y, 6), 0.0)
+        return x, y
+
+    placed_posts = set()
+
+    def _ensure_post(name, x, y):
+        key = (round(x, 6), round(y, 6))
+        if key in placed_posts:
+            return
+        placed_posts.add(key)
+        obj = add_box(col, name, x, y, base_z, post, post, rail_h)
+        obj["atlas_category"] = str(RAILING_TILE_CATEGORY or "walls")
+        if RAILING_TILE_ID:
+            obj["atlas_tile_id"] = str(RAILING_TILE_ID)
+        created.append(obj)
+
+    for run_idx, (orientation, fixed, start, end) in enumerate(runs):
+        side_offset = h_offsets.get(round(fixed, 6), 0.0) if orientation == "H" else v_offsets.get(round(fixed, 6), 0.0)
+        run_len = end - start
+        if run_len <= EPS:
+            continue
+
+        positions = []
+        coords = []
+
+        if orientation == "H":
+            sx, sy = _corner_xy(start, fixed)
+            ex, ey = _corner_xy(end, fixed)
+            positions.append(sx)
+            coords.append((sx, sy))
+        else:
+            sx, sy = _corner_xy(fixed, start)
+            ex, ey = _corner_xy(fixed, end)
+            positions.append(sy)
+            coords.append((sx, sy))
+
+        axis_value = start + 1.0
+        interior_idx = 0
+        while axis_value < end - EPS:
+            x, y = _post_xy(orientation, fixed, axis_value, side_offset)
+            positions.append(axis_value)
+            coords.append((x, y))
+            interior_idx += 1
+            axis_value += 1.0
+
+        if orientation == "H":
+            positions.append(ex)
+            coords.append((ex, ey))
+        else:
+            positions.append(ey)
+            coords.append((ex, ey))
+
+        # Create one shared post per unique coordinate, including the outer corner posts.
+        for post_idx, (x, y) in enumerate(coords):
+            _ensure_post(f"RailingPost_{int(z_offset*1000)}_{run_idx}_{post_idx}", x, y)
+
+        # Create rails only between neighboring posts, so corner joints stop at the corner post.
+        for level_idx, level in enumerate(levels):
+            z = z_offset + WALL_HEIGHT + level
+            for seg_idx in range(len(coords) - 1):
+                (x0, y0) = coords[seg_idx]
+                (x1, y1) = coords[seg_idx + 1]
+                if orientation == "H":
+                    seg_len = x1 - x0
+                    if seg_len <= EPS:
+                        continue
+                    x = (x0 + x1) * 0.5
+                    y = y0
+                    obj = add_box(col, f"RailingRail_{int(z_offset*1000)}_{run_idx}_{level_idx}_{seg_idx}", x, y, z, seg_len, rail_t, rail_t)
+                else:
+                    seg_len = y1 - y0
+                    if seg_len <= EPS:
+                        continue
+                    x = x0
+                    y = (y0 + y1) * 0.5
+                    obj = add_box(col, f"RailingRail_{int(z_offset*1000)}_{run_idx}_{level_idx}_{seg_idx}", x, y, z, rail_t, seg_len, rail_t)
+                obj["atlas_category"] = str(RAILING_TILE_CATEGORY or "walls")
+                if RAILING_TILE_ID:
+                    obj["atlas_tile_id"] = str(RAILING_TILE_ID)
+                created.append(obj)
+    return created
+
+
 def add_roof_patches(col, current_patches: List[Rect], z_offset: float, next_patches: Optional[List[Rect]] = None, opening_rect: Optional[Rect] = None, open_void: Optional[Rect] = None):
     roof_mat = ensure_material("FP_Roof", (0.72, 0.72, 0.74, 1.0))
     roof_z = z_offset + WALL_HEIGHT + FLOOR_THICKNESS * 0.5
@@ -2625,6 +2783,11 @@ def add_roof_patches(col, current_patches: List[Rect], z_offset: float, next_pat
         else:
             add_box(col, f"Roof_{int(z_offset*1000)}_{patch_index}", patch.cx, patch.cy, roof_z, patch.w, patch.h, FLOOR_THICKNESS, roof_mat)
     add_roof_borders(col, roof_targets, z_offset)
+    # Railings should be generated only on the final roof level, not on intermediate
+    # setback roofs / exposed patches between floors.
+    is_top_roof = next_patches is None
+    if is_top_roof:
+        add_roof_railings(col, z_offset)
     return roof_targets
 
 
@@ -2707,6 +2870,9 @@ def _write_default_atlas_manifest(path_str: str):
         ],
         "floor_bands": [
             {"id": "floor_band_01", "x": 256, "y": 0, "w": 256, "h": 256, "tile_width_m": 1.0, "tile_height_m": 0.1}
+        ],
+        "railings": [
+            {"id": "railing_01", "x": 512, "y": 0, "w": 256, "h": 256, "tile_width_m": 1.0, "tile_height_m": 1.0}
         ],
         "stairs": [
             {"id": "stair_01", "x": 768, "y": 512, "w": 128, "h": 128, "tile_width_m": 1.0, "tile_height_m": 1.0},
@@ -2883,6 +3049,7 @@ def apply_atlas_stage1(collection_name: str, seed_value: int, manifest_override:
         "stair_landings": manifest.get("stair_landings", []),
         "roof_borders": manifest.get("roof_borders", manifest.get("walls", [])),
         "floor_bands": manifest.get("floor_bands", manifest.get("walls", [])),
+        "railings": manifest.get("railings", manifest.get("walls", [])),
     }
 
     mat_cache = {}
@@ -2917,6 +3084,8 @@ def apply_atlas_stage1(collection_name: str, seed_value: int, manifest_override:
             category = "stairs"
         elif name.startswith("StairLanding") or name.startswith("StairTopPlatform"):
             category = "stair_landings"
+        elif name.startswith("RailingPost_") or name.startswith("RailingRail_"):
+            category = "railings"
         elif name.startswith("OWD_") or name.startswith("EntryDoor_") or obj.get("generated_entry_door"):
             category = "wall_doors"
         elif name.startswith("OWW_"):
@@ -2926,13 +3095,13 @@ def apply_atlas_stage1(collection_name: str, seed_value: int, manifest_override:
         elif ATLAS_INCLUDE_INTERIOR_WALLS and (name.startswith("IW_") or name.startswith("SW_")):
             category = "walls"
 
-        if not category:
-            continue
-
         override_category = obj.get("atlas_category")
         override_tile_id = obj.get("atlas_tile_id")
         if override_category:
             category = str(override_category)
+
+        if not category:
+            continue
         regions = cats.get(category, [])
         region = None
         if override_tile_id:
@@ -3527,6 +3696,13 @@ _DEFAULTS = {
     "FLOOR_BAND_HEIGHT": FLOOR_BAND_HEIGHT,
     "FLOOR_BAND_TILE_CATEGORY": FLOOR_BAND_TILE_CATEGORY,
     "FLOOR_BAND_TILE_ID": FLOOR_BAND_TILE_ID,
+    "RAILINGS_ENABLED": RAILINGS_ENABLED,
+    "RAILING_HEIGHT": RAILING_HEIGHT,
+    "RAILING_POST_SIZE": RAILING_POST_SIZE,
+    "RAILING_RAIL_THICKNESS": RAILING_RAIL_THICKNESS,
+    "RAILING_RAIL_COUNT": RAILING_RAIL_COUNT,
+    "RAILING_TILE_CATEGORY": RAILING_TILE_CATEGORY,
+    "RAILING_TILE_ID": RAILING_TILE_ID,
 }
 
 
@@ -3550,6 +3726,7 @@ def apply_settings(settings: dict):
     global MODULAR_TILES_ENABLED, WALL_TILE_WIDTH, SURFACE_TILE_SIZE
     global ROOF_BORDER_ENABLED, ROOF_BORDER_WIDTH, ROOF_BORDER_HEIGHT, ROOF_BORDER_TILE_CATEGORY, ROOF_BORDER_TILE_ID
     global FLOOR_BAND_ENABLED, FLOOR_BAND_DEPTH, FLOOR_BAND_HEIGHT, FLOOR_BAND_TILE_CATEGORY, FLOOR_BAND_TILE_ID
+    global RAILINGS_ENABLED, RAILING_HEIGHT, RAILING_POST_SIZE, RAILING_RAIL_THICKNESS, RAILING_RAIL_COUNT, RAILING_TILE_CATEGORY, RAILING_TILE_ID
 
     for key, value in settings.items():
         if key in globals():
