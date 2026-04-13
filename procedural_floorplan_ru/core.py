@@ -2525,7 +2525,7 @@ def _point_in_any_rect(px: float, py: float, rects: List[Rect], margin: float = 
     return False
 
 
-def _add_tiled_linear_trim(col, name_prefix: str, runs, z_center: float, vertical_size: float, side_size: float, *, inward=True, atlas_category="walls", atlas_tile_id="", source_rects: Optional[List[Rect]] = None, align_to_wall_outer_face: bool = True):
+def _add_tiled_linear_trim(col, name_prefix: str, runs, z_center: float, vertical_size: float, side_size: float, *, inward=True, atlas_category="walls", atlas_tile_id="", source_rects: Optional[List[Rect]] = None, align_to_wall_outer_face: bool = True, protrude_outward: bool = False):
     tile_len = 1.0
     created = []
     vertical_size = max(0.01, float(vertical_size))
@@ -2551,7 +2551,10 @@ def _add_tiled_linear_trim(col, name_prefix: str, runs, z_center: float, vertica
 
         side_offset = dir_sign * side_size * 0.5
         if align_to_wall_outer_face:
-            side_offset = dir_sign * ((WALL_THICKNESS * 0.5) - (side_size * 0.5))
+            if protrude_outward:
+                side_offset = dir_sign * ((WALL_THICKNESS * 0.5) + (side_size * 0.5))
+            else:
+                side_offset = dir_sign * ((WALL_THICKNESS * 0.5) - (side_size * 0.5))
 
         for tile_idx, (offset, seg_len) in enumerate(parts):
             center_axis = axis_start + offset
@@ -2609,11 +2612,12 @@ def add_floor_seam_bands(col, footprint_rects: List[Rect], z_offset: float):
         seam_z,
         FLOOR_BAND_HEIGHT,
         FLOOR_BAND_DEPTH,
-        inward=True,
+        inward=False,
         atlas_category=FLOOR_BAND_TILE_CATEGORY,
         atlas_tile_id=FLOOR_BAND_TILE_ID,
         source_rects=perimeter_rects,
         align_to_wall_outer_face=True,
+        protrude_outward=True,
     )
 
 def add_roof_railings(col, z_offset: float):
@@ -2782,11 +2786,12 @@ def add_roof_patches(col, current_patches: List[Rect], z_offset: float, next_pat
             add_roof_tiles_world_aligned(col, f"Roof_{int(z_offset*1000)}_{patch_index}", patch, roof_z, FLOOR_THICKNESS, SURFACE_TILE_SIZE, roof_mat)
         else:
             add_box(col, f"Roof_{int(z_offset*1000)}_{patch_index}", patch.cx, patch.cy, roof_z, patch.w, patch.h, FLOOR_THICKNESS, roof_mat)
-    add_roof_borders(col, roof_targets, z_offset)
-    # Railings should be generated only on the final roof level, not on intermediate
-    # setback roofs / exposed patches between floors.
+    # RoofBorder should follow the old simple generation logic, but only on the
+    # final roof level. Intermediate exposed patches between floors should not
+    # receive RoofBorder.
     is_top_roof = next_patches is None
     if is_top_roof:
+        add_roof_borders(col, roof_targets, z_offset)
         add_roof_railings(col, z_offset)
     return roof_targets
 
