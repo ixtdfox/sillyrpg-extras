@@ -1471,6 +1471,28 @@ def remove_openings_overlapping_blockers(openings: List[Opening], blockers: List
         if not bad:
             out.append(op)
     return out
+
+
+def apply_linear_gap_blockers(openings: List[Opening], blocked_intervals: List[Tuple[float, float]]) -> List[Opening]:
+    if not openings or not blocked_intervals:
+        return list(openings)
+    blockers = [Opening(a, b, -1.0e6, 1.0e6) for (a, b) in blocked_intervals if b - a > EPS]
+    return remove_openings_overlapping_blockers(openings, blockers)
+
+
+
+def entrance_gap_blockers_for_segment(seg, entrance_seg, entrance_opening: Optional[Opening], gap: float) -> List[Tuple[float, float]]:
+    if entrance_seg is None or entrance_opening is None:
+        return []
+    if seg["ori"] != entrance_seg["ori"] or not almost(seg["fixed"], entrance_seg["fixed"]):
+        return []
+    blocked_start = entrance_opening.start - gap
+    blocked_end = entrance_opening.end + gap
+    iv = overlap(seg["start"], seg["end"], blocked_start, blocked_end)
+    return [iv] if iv else []
+
+
+
 def offset_openings(openings: List[Opening], z_offset: float) -> List[Opening]:
     if abs(z_offset) <= EPS:
         return list(openings)
@@ -2306,18 +2328,22 @@ def draw_geometry(col, rooms: List[Room], corridor: Rect, stair: Optional[StairP
         items = [("room", r, r.rect) for r in valid_rooms] + [("corridor", None, corridor)]
         boundary_segments = boundary_segments_from_rects(items)
         entrance_seg = choose_entrance_segment(boundary_segments) if include_entrance else None
+        entrance_reference_opening = None
+        entrance_gap = _modular_unit()
+        if entrance_seg is not None:
+            mid = (entrance_seg["start"] + entrance_seg["end"]) * 0.5
+            seg_len = max(0.0, entrance_seg["end"] - entrance_seg["start"])
+            target_half = ENTRY_DOOR_WIDTH * 0.5
+            safe_half = max(0.20, (seg_len - 0.30) * 0.5)
+            half = min(target_half, safe_half)
+            entrance_reference_opening = Opening(mid - half, mid + half, 0.0, DOOR_HEIGHT)
 
         for i, seg in enumerate(boundary_segments):
             entrance_only_ops = []
             seg_name_prefix = "OW"
             is_entrance_segment = entrance_seg is seg
-            if is_entrance_segment:
-                mid = (seg["start"] + seg["end"]) * 0.5
-                seg_len = max(0.0, seg["end"] - seg["start"])
-                target_half = ENTRY_DOOR_WIDTH * 0.5
-                safe_half = max(0.20, (seg_len - 0.30) * 0.5)
-                half = min(target_half, safe_half)
-                raw_entrance_ops = [Opening(mid - half, mid + half, 0.0, DOOR_HEIGHT)]
+            if is_entrance_segment and entrance_reference_opening is not None:
+                raw_entrance_ops = [entrance_reference_opening]
                 entrance_only_ops = normalize_openings_for_segment(raw_entrance_ops, seg["start"], seg["end"])
                 seg_name_prefix = "OW"
             window_ops = []
@@ -2326,6 +2352,7 @@ def draw_geometry(col, rooms: List[Room], corridor: Rect, stair: Optional[StairP
                 window_ops = normalize_openings_for_segment(raw_window_ops, seg["start"], seg["end"])
                 if window_ops:
                     seg_name_prefix = "OWW"
+            window_ops = apply_linear_gap_blockers(window_ops, entrance_gap_blockers_for_segment(seg, entrance_seg, entrance_reference_opening, entrance_gap))
             window_ops = remove_openings_overlapping_blockers(window_ops, entrance_only_ops)
             ops = prune_overlapping_openings(entrance_only_ops + window_ops)
             ops = offset_openings(ops, z_offset)
@@ -2525,16 +2552,15 @@ def _point_in_any_rect(px: float, py: float, rects: List[Rect], margin: float = 
     return False
 
 
-def _add_tiled_linear_trim(col, name_prefix: str, runs, z_center: float, vertical_size: float, side_size: float, *, inward=True, atlas_category="walls", atlas_tile_id="", source_rects: Optional[List[Rect]] = None, align_to_wall_outer_face: bool = True, protrude_outward: bool = False):
+def _add_tiled_linear_trim(col, name_prefix: str, runs, z_center: float, vertical_size: float, side_size: float, *, inward=True, atlas_category="walls", atlas_tile_id="", source_rects: Optional[List[Rect]] = None, align_to_wall_outer_face: bool = True, protrude_outward: bool = False, end_overlap: float = 0.0):
     tile_len = 1.0
     created = []
     vertical_size = max(0.01, float(vertical_size))
     side_size = max(0.01, float(side_size))
+    end_overlap = max(0.0, float(end_overlap))
     source_rects = source_rects or []
     probe = max(0.02, max(side_size, WALL_THICKNESS) * 0.6)
     for run_idx, (orientation, fixed, start, end) in enumerate(runs):
-        parts = _split_length_into_tiles(end - start, tile_len, keep_uniform=True)
-        axis_start = start
         mid_axis = (start + end) * 0.5
         if orientation == "H":
             inside_pos = _point_in_any_rect(mid_axis, fixed + probe, source_rects)
@@ -2556,6 +2582,28 @@ def _add_tiled_linear_trim(col, name_prefix: str, runs, z_center: float, vertica
             else:
                 side_offset = dir_sign * ((WALL_THICKNESS * 0.5) - (side_size * 0.5))
 
+        # When the trim is pushed outward from the wall face (for example FloorBand),
+        # half of the visual corner distance comes from the wall thickness itself.
+        # In that case, extending only by half of the trim depth is not enough and
+        # leaves a small square notch near the corner post. Extend at least up to the
+        # trim centerline offset so perpendicular runs actually meet.
+        overlap_for_run = end_overlap
+        if align_to_wall_outer_face and protrude_outward:
+            # Outward trims need a stronger corner extension than roof borders.
+            # Extending only to the trim centerline can still leave a tiny notch
+            # against corner posts / perpendicular runs because the visible contact
+            # happens at the outer trim face, not at the centerline.
+            overlap_for_run = max(
+                overlap_for_run,
+                abs(side_offset) + (side_size * 0.5),
+                (WALL_THICKNESS * 0.5) + side_size,
+            )
+
+        extended_start = start - overlap_for_run
+        extended_end = end + overlap_for_run
+        parts = _split_length_into_tiles(extended_end - extended_start, tile_len, keep_uniform=True)
+        axis_start = extended_start
+
         for tile_idx, (offset, seg_len) in enumerate(parts):
             center_axis = axis_start + offset
             if orientation == "H":
@@ -2573,6 +2621,30 @@ def _add_tiled_linear_trim(col, name_prefix: str, runs, z_center: float, vertica
             created.append(obj)
     return created
 
+
+
+
+def add_external_corner_posts(col, z_offset: float):
+    """Add slim vertical posts on the four outer building corners to hide wall seams.
+
+    Posts should sit *outside* the wall planes so they visually cover the outer corner,
+    instead of being centered on the wall intersection and sinking into both walls.
+    """
+    post_size = max(0.04, min(0.12, WALL_THICKNESS * 0.6))
+    post_z = z_offset + WALL_HEIGHT * 0.5
+    half = post_size * 0.5
+    corners = [
+        (-half, -half),
+        (HOUSE_WIDTH + half, -half),
+        (-half, HOUSE_DEPTH + half),
+        (HOUSE_WIDTH + half, HOUSE_DEPTH + half),
+    ]
+    created = []
+    for idx, (cx, cy) in enumerate(corners):
+        obj = add_box(col, f"CornerPost_{int(z_offset*1000)}_{idx}", cx, cy, post_z, post_size, post_size, WALL_HEIGHT)
+        obj["atlas_category"] = str("walls")
+        created.append(obj)
+    return created
 
 def add_roof_borders(col, roof_patches: List[Rect], z_offset: float):
     if not ROOF_BORDER_ENABLED:
@@ -2594,6 +2666,7 @@ def add_roof_borders(col, roof_patches: List[Rect], z_offset: float):
         atlas_tile_id=ROOF_BORDER_TILE_ID,
         source_rects=perimeter_rects,
         align_to_wall_outer_face=True,
+        end_overlap=ROOF_BORDER_WIDTH * 0.5,
     )
 
 
@@ -2618,6 +2691,7 @@ def add_floor_seam_bands(col, footprint_rects: List[Rect], z_offset: float):
         source_rects=perimeter_rects,
         align_to_wall_outer_face=True,
         protrude_outward=True,
+        end_overlap=max(FLOOR_BAND_DEPTH, WALL_THICKNESS * 0.5 + FLOOR_BAND_DEPTH),
     )
 
 def add_roof_railings(col, z_offset: float):
@@ -3602,6 +3676,7 @@ def generate():
         next_patches = footprint_rects_from_layout(next_spec["rooms"], next_spec["corridor"], open_void=next_spec.get("open_void")) if next_spec is not None else None
         add_roof_patches(col, current_patches, z_offset, next_patches=next_patches, opening_rect=opening_rect, open_void=spec.get("open_void"))
         add_floor_seam_bands(col, current_patches, z_offset)
+        add_external_corner_posts(col, z_offset)
 
         inherited_void = spec["stair"].rect if spec["stair"] is not None else None
 
