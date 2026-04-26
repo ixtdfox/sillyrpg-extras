@@ -5,12 +5,14 @@ import random
 
 import bpy
 
-from . import addon, atlas_manifest, generator, props as props_module, textures, utils
+from . import addon, atlas_manifest, furniture_placement, generator, props as props_module, textures, utils
 
 
 def _maybe_randomize_seed(settings):
     if settings.randomize_each_run:
         settings.seed = random.randint(0, 2_147_483_647)
+        if hasattr(settings, "furniture_seed"):
+            settings.furniture_seed = settings.seed
 
 
 class RY_OT_generate_single(bpy.types.Operator):
@@ -107,7 +109,81 @@ class RY_OT_generate_combo(bpy.types.Operator):
             finally:
                 settings.clear_previous_before_generate = original_clear
             return result
+        if settings.generation_mode == "furniture":
+            return bpy.ops.rooftop_yard_ru.generate_furniture()
         return bpy.ops.rooftop_yard_ru.generate_preview()
+
+
+class RY_OT_generate_furniture(bpy.types.Operator):
+    bl_idname = "rooftop_yard_ru.generate_furniture"
+    bl_label = "Сгенерировать мебель"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        settings = context.scene.rooftop_yard_props_settings
+        _maybe_randomize_seed(settings)
+        try:
+            objects = furniture_placement.generate_furniture_in_rectangle(context, settings, use_selected_bounds=False)
+            utils.focus_generated_objects(context, objects)
+        except Exception as exc:
+            self.report({"ERROR"}, f"Ошибка генерации мебели: {exc}")
+            return {"CANCELLED"}
+        self.report({"INFO"}, "Мебель сгенерирована")
+        return {"FINISHED"}
+
+
+class RY_OT_generate_selected_room_furniture(bpy.types.Operator):
+    bl_idname = "rooftop_yard_ru.generate_selected_room_furniture"
+    bl_label = "Сгенерировать мебель для выбранной комнаты"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        settings = context.scene.rooftop_yard_props_settings
+        _maybe_randomize_seed(settings)
+        try:
+            objects = furniture_placement.generate_furniture_in_rectangle(context, settings, use_selected_bounds=True)
+            utils.focus_generated_objects(context, objects)
+        except Exception as exc:
+            self.report({"ERROR"}, f"Ошибка генерации мебели в выбранной комнате: {exc}")
+            return {"CANCELLED"}
+        self.report({"INFO"}, "Мебель для выбранной комнаты сгенерирована")
+        return {"FINISHED"}
+
+
+class RY_OT_generate_furniture_catalog_preview(bpy.types.Operator):
+    bl_idname = "rooftop_yard_ru.generate_furniture_catalog_preview"
+    bl_label = "Показать каталог мебели"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        settings = context.scene.rooftop_yard_props_settings
+        _maybe_randomize_seed(settings)
+        try:
+            objects = furniture_placement.generate_furniture_catalog_preview(context, settings)
+            utils.focus_generated_objects(context, objects)
+        except Exception as exc:
+            self.report({"ERROR"}, f"Ошибка каталога мебели: {exc}")
+            return {"CANCELLED"}
+        self.report({"INFO"}, "Каталог мебели сгенерирован")
+        return {"FINISHED"}
+
+
+class RY_OT_generate_single_furniture(bpy.types.Operator):
+    bl_idname = "rooftop_yard_ru.generate_single_furniture"
+    bl_label = "Сгенерировать выбранный интерьерный объект"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        settings = context.scene.rooftop_yard_props_settings
+        _maybe_randomize_seed(settings)
+        try:
+            objects = furniture_placement.generate_single_furniture(context, settings)
+            utils.focus_generated_objects(context, objects)
+        except Exception as exc:
+            self.report({"ERROR"}, f"Ошибка генерации интерьерного объекта: {exc}")
+            return {"CANCELLED"}
+        self.report({"INFO"}, "Интерьерный объект сгенерирован")
+        return {"FINISHED"}
 
 
 class RY_OT_clear_generated(bpy.types.Operator):
@@ -199,6 +275,10 @@ classes = (
     RY_OT_generate_roof,
     RY_OT_generate_yard,
     RY_OT_generate_combo,
+    RY_OT_generate_furniture,
+    RY_OT_generate_selected_room_furniture,
+    RY_OT_generate_furniture_catalog_preview,
+    RY_OT_generate_single_furniture,
     RY_OT_clear_generated,
     RY_OT_reset_defaults,
     RY_OT_reload_manifest,

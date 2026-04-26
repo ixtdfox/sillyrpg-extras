@@ -1,0 +1,43 @@
+{
+  "atlas": "furniture_atlas.png",
+  "version": 1,
+  "tileSize": 128,
+  "atlas_width": 512,
+  "atlas_height": 512,
+  "materials": {
+    "painted_metal_white": { "x": 0, "y": 0, "w": 128, "h": 128 },
+    "painted_metal_gray": { "x": 128, "y": 0, "w": 128, "h": 128 },
+    "dark_plastic": { "x": 256, "y": 0, "w": 128, "h": 128 },
+    "rubber_black": { "x": 384, "y": 0, "w": 128, "h": 128 },
+    "wood_light": { "x": 0, "y": 128, "w": 128, "h": 128 },
+    "wood_dark": { "x": 128, "y": 128, "w": 128, "h": 128 },
+    "fabric_blue": { "x": 256, "y": 128, "w": 128, "h": 128 },
+    "fabric_brown": { "x": 384, "y": 128, "w": 128, "h": 128 },
+    "glass_blue": { "x": 0, "y": 256, "w": 128, "h": 128 },
+    "screen_dark": { "x": 128, "y": 256, "w": 128, "h": 128 },
+    "screen_green": { "x": 256, "y": 256, "w": 128, "h": 128 },
+    "ceramic_white": { "x": 384, "y": 256, "w": 128, "h": 128 },
+    "warning_yellow": { "x": 0, "y": 384, "w": 128, "h": 128 },
+    "medical_red": { "x": 128, "y": 384, "w": 128, "h": 128 },
+    "label_panel": { "x": 256, "y": 384, "w": 128, "h": 128 },
+    "vent_grille": { "x": 384, "y": 384, "w": 128, "h": 128 }
+  },
+  "regions": {
+    "painted_metal_white": { "x": 0, "y": 0, "w": 128, "h": 128 },
+    "painted_metal_gray": { "x": 128, "y": 0, "w": 128, "h": 128 },
+    "dark_plastic": { "x": 256, "y": 0, "w": 128, "h": 128 },
+    "rubber_black": { "x": 384, "y": 0, "w": 128, "h": 128 },
+    "wood_light": { "x": 0, "y": 128, "w": 128, "h": 128 },
+    "wood_dark": { "x": 128, "y": 128, "w": 128, "h": 128 },
+    "fabric_blue": { "x": 256, "y": 128, "w": 128, "h": 128 },
+    "fabric_brown": { "x": 384, "y": 128, "w": 128, "h": 128 },
+    "glass_blue": { "x": 0, "y": 256, "w": 128, "h": 128 },
+    "screen_dark": { "x": 128, "y": 256, "w": 128, "h": 128 },
+    "screen_green": { "x": 256, "y": 256, "w": 128, "h": 128 },
+    "ceramic_white": { "x": 384, "y": 256, "w": 128, "h": 128 },
+    "warning_yellow": { "x": 0, "y": 384, "w": 128, "h": 128 },
+    "medical_red": { "x": 128, "y": 384, "w": 128, "h": 128 },
+    "label_panel": { "x": 256, "y": 384, "w": 128, "h": 128 },
+    "vent_grille": { "x": 384, "y": 384, "w": 128, "h": 128 }
+  }
+}

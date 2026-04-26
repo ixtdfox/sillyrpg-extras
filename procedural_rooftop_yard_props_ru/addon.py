@@ -4,17 +4,23 @@ import importlib
 
 import bpy
 
-if "atlas_manifest" in locals():
-    atlas_manifest = importlib.reload(atlas_manifest)
-    textures = importlib.reload(textures)
-    generator = importlib.reload(generator)
-    props = importlib.reload(props)
-    operators = importlib.reload(operators)
-    ui = importlib.reload(ui)
-else:
-    from . import atlas_manifest, generator, operators, props, textures, ui
+def _load_module(name: str):
+    qualified = f"{__package__}.{name}"
+    module = importlib.import_module(qualified)
+    return importlib.reload(module) if name in globals() else module
 
-modules = (atlas_manifest, textures, props, operators, ui)
+
+atlas_manifest = _load_module("atlas_manifest")
+textures = _load_module("textures")
+furniture_catalog = _load_module("furniture_catalog")
+furniture_generator = _load_module("furniture_generator")
+furniture_placement = _load_module("furniture_placement")
+generator = _load_module("generator")
+props = _load_module("props")
+operators = _load_module("operators")
+ui = _load_module("ui")
+
+modules = (atlas_manifest, textures, furniture_catalog, furniture_generator, furniture_placement, props, operators, ui)
 _registered = False
 
 

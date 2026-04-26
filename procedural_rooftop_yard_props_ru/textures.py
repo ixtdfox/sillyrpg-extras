@@ -7,8 +7,8 @@ import bpy
 from . import atlas_manifest, utils
 
 
-TRANSPARENT_REGIONS = {"chainlink", "glass_light", "lamp_glow"}
-EMISSIVE_REGIONS = {"lamp_glow"}
+TRANSPARENT_REGIONS = {"chainlink", "glass_light", "glass_blue", "lamp_glow"}
+EMISSIVE_REGIONS = {"lamp_glow", "screen_green"}
 
 
 def _load_or_create_image(image_path: str):
@@ -75,7 +75,9 @@ def ensure_material_for_region(runtime: dict, region_name: str):
     transparent = region_name in TRANSPARENT_REGIONS
     emissive = region_name in EMISSIVE_REGIONS
     suffix = "Emissive" if emissive else "Transparent" if transparent else "Opaque"
-    return _ensure_material(f"RY_Atlas_{suffix}", image, transparent=transparent, emissive=emissive)
+    image_stem = Path(atlas_manifest._abs_path(runtime.get("image_path", ""))).stem or "Placeholder"
+    safe_stem = "".join(char if char.isalnum() or char == "_" else "_" for char in image_stem)
+    return _ensure_material(f"RY_Atlas_{suffix}_{safe_stem}", image, transparent=transparent, emissive=emissive)
 
 
 def assign_uv_region(obj: bpy.types.Object, runtime: dict, region_name: str) -> None:

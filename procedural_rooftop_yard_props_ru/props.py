@@ -6,7 +6,7 @@ import bpy
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty, PointerProperty, StringProperty
 
 from . import addon
-from . import atlas_manifest, generator
+from . import atlas_manifest, furniture_catalog, generator
 
 
 DEFAULTS = {
@@ -32,6 +32,18 @@ DEFAULTS = {
     "preview_variants_per_type": 1,
     "atlas_image_path": atlas_manifest.addon_asset_path("rooftop_yard_atlas.png"),
     "manifest_path": atlas_manifest.addon_asset_path("rooftop_yard_manifest.json"),
+    "prop_category": "all",
+    "room_type": "all",
+    "furniture_object_type": "all",
+    "furniture_density": 30,
+    "furniture_seed": 1,
+    "furniture_use_atlas": True,
+    "furniture_area_width": 8.0,
+    "furniture_area_depth": 6.0,
+    "furniture_margin": 0.4,
+    "furniture_collision_padding": 0.15,
+    "furniture_atlas_image_path": atlas_manifest.addon_asset_path("furniture_atlas.png"),
+    "furniture_manifest_path": atlas_manifest.addon_asset_path("furniture_atlas_manifest.json"),
 }
 
 
@@ -48,6 +60,13 @@ def _on_single_category_changed(self, _context):
     valid_ids = {item[0] for item in items}
     if getattr(self, "single_prop_type", "") not in valid_ids:
         self.single_prop_type = items[0][0]
+
+
+def _on_room_type_changed(self, _context):
+    items = furniture_catalog.object_enum_items(self, _context)
+    valid_ids = {item[0] for item in items}
+    if getattr(self, "furniture_object_type", "all") not in valid_ids:
+        self.furniture_object_type = "all"
 
 
 def apply_defaults_to_props(props):
@@ -81,6 +100,18 @@ def apply_defaults_to_props(props):
     props.lighting_zone = True
     props.atlas_image_path = DEFAULTS["atlas_image_path"]
     props.manifest_path = DEFAULTS["manifest_path"]
+    props.prop_category = DEFAULTS["prop_category"]
+    props.room_type = DEFAULTS["room_type"]
+    props.furniture_object_type = DEFAULTS["furniture_object_type"]
+    props.furniture_density = DEFAULTS["furniture_density"]
+    props.furniture_seed = DEFAULTS["furniture_seed"]
+    props.furniture_use_atlas = DEFAULTS["furniture_use_atlas"]
+    props.furniture_area_width = DEFAULTS["furniture_area_width"]
+    props.furniture_area_depth = DEFAULTS["furniture_area_depth"]
+    props.furniture_margin = DEFAULTS["furniture_margin"]
+    props.furniture_collision_padding = DEFAULTS["furniture_collision_padding"]
+    props.furniture_atlas_image_path = DEFAULTS["furniture_atlas_image_path"]
+    props.furniture_manifest_path = DEFAULTS["furniture_manifest_path"]
     props.single_category = "roof_power"
     props.single_prop_type = "solar_panel_array"
     props.apply_bevels = True
@@ -100,7 +131,6 @@ def apply_defaults_to_props(props):
     props.enable_special = True
     props.manifest_json = ""
     props.manifest_sync_lock = False
-    props.manifest_region = "metal_light"
     props.region_x = 0
     props.region_y = 0
     props.region_w = 128
@@ -118,9 +148,20 @@ class RooftopYardPropsSettings(bpy.types.PropertyGroup):
             ("roof", "Крыша здания", "Генерация объектов на крыше"),
             ("yard", "Придомовая территория", "Генерация объектов вокруг здания"),
             ("roof_yard", "Крыша + территория", "Комбинированная генерация"),
+            ("furniture", "Мебель и интерьер", "Генерация мебели и интерьерных объектов"),
             ("selected", "Только выбранные категории", "Работа по включённым категориям"),
         ],
         default=DEFAULTS["generation_mode"],
+    )
+    prop_category: EnumProperty(
+        name="Категория объектов",
+        items=[
+            ("all", "Все", "Генерировать все категории"),
+            ("rooftop", "Крыша", "Крышные объекты"),
+            ("yard", "Придомовая территория", "Объекты рядом с домом"),
+            ("furniture", "Мебель и интерьер", "Мебель и интерьерные объекты для комнат"),
+        ],
+        default=DEFAULTS["prop_category"],
     )
     clear_previous_before_generate: BoolProperty(name="Удалять прошлый результат", default=DEFAULTS["clear_previous_before_generate"])
     scale_multiplier: FloatProperty(name="Scale Multiplier", default=DEFAULTS["scale_multiplier"], min=0.25, soft_max=3.0)
@@ -146,6 +187,27 @@ class RooftopYardPropsSettings(bpy.types.PropertyGroup):
     preview_variants_per_type: IntProperty(name="Вариантов на тип", default=DEFAULTS["preview_variants_per_type"], min=1, max=5)
     include_preview_labels: BoolProperty(name="Подписи в preview", default=True)
     include_ground_plane: BoolProperty(name="Плоскость под preview", default=True)
+
+    room_type: EnumProperty(
+        name="Тип комнаты",
+        items=furniture_catalog.ROOM_ENUM_ITEMS,
+        default=DEFAULTS["room_type"],
+        update=_on_room_type_changed,
+    )
+    furniture_object_type: EnumProperty(
+        name="Тип мебели",
+        items=furniture_catalog.FURNITURE_OBJECT_ENUM_ITEMS,
+        default=DEFAULTS["furniture_object_type"],
+    )
+    furniture_density: IntProperty(name="Количество объектов", min=1, max=200, default=DEFAULTS["furniture_density"])
+    furniture_seed: IntProperty(name="Seed мебели", default=DEFAULTS["furniture_seed"], min=0)
+    furniture_use_atlas: BoolProperty(name="Использовать атлас мебели", default=DEFAULTS["furniture_use_atlas"])
+    furniture_area_width: FloatProperty(name="Ширина зоны мебели", default=DEFAULTS["furniture_area_width"], min=1.0, max=100.0)
+    furniture_area_depth: FloatProperty(name="Глубина зоны мебели", default=DEFAULTS["furniture_area_depth"], min=1.0, max=100.0)
+    furniture_margin: FloatProperty(name="Отступ мебели", default=DEFAULTS["furniture_margin"], min=0.0, max=5.0)
+    furniture_collision_padding: FloatProperty(name="Запас коллизий мебели", default=DEFAULTS["furniture_collision_padding"], min=0.0, max=2.0)
+    furniture_atlas_image_path: StringProperty(name="Furniture atlas path", default=DEFAULTS["furniture_atlas_image_path"], subtype="FILE_PATH")
+    furniture_manifest_path: StringProperty(name="Furniture manifest path", default=DEFAULTS["furniture_manifest_path"], subtype="FILE_PATH")
 
     roof_width: FloatProperty(name="Ширина крыши", default=DEFAULTS["roof_width"], min=4.0, soft_max=60.0)
     roof_depth: FloatProperty(name="Глубина крыши", default=DEFAULTS["roof_depth"], min=4.0, soft_max=60.0)
