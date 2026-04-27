@@ -9,6 +9,7 @@ from .. import atlas
 from ..building_stories_manager import BuildingStoriesManager
 from ..building_manager import GenerationContext, settings_from_props
 from ..common.utils import ensure_collection, focus_generated_objects
+from ..optimization import GeneratedMeshOptimizer
 from .props import apply_defaults_to_props
 
 
@@ -164,12 +165,39 @@ class FLOORPLAN_V2_OT_atlas_apply_existing(bpy.types.Operator):
             return {"CANCELLED"}
 
 
+class FLOORPLAN_V2_OT_optimize_generated_meshes(bpy.types.Operator):
+    """Оператор объединения сгенерированных тайлов в крупные baked mesh-объекты."""
+
+    bl_idname = "floorplan_ru_v2.optimize_generated_meshes"
+    bl_label = "Оптимизировать меши"
+    bl_description = "Объединить сгенерированные тайлы в крупные меши без растягивания текстур"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        props = context.scene.floorplan_ru_v2_settings
+        try:
+            settings = settings_from_props(props)
+            collection = ensure_collection(context.scene, settings.collection_name, delete_old=False)
+            optimizer = GeneratedMeshOptimizer()
+            selected_only = bool(optimizer.collect_candidates(collection, selected_only=True))
+            result = optimizer.optimize_collection(collection, selected_only=selected_only)
+            scope = "выделение" if selected_only else "коллекция"
+            self.report(
+                {"INFO"},
+                f"Оптимизация завершена ({scope}): групп {result.groups_optimized}, удалено объектов {result.objects_removed}",
+            )
+            return {"FINISHED"}
+        except Exception as exc:
+            self.report({"ERROR"}, f"Не удалось оптимизировать меши: {exc}")
+            return {"CANCELLED"}
+
 classes = (
     FLOORPLAN_V2_OT_generate,
     FLOORPLAN_V2_OT_reset_defaults,
     FLOORPLAN_V2_OT_atlas_load_manifest,
     FLOORPLAN_V2_OT_atlas_save_manifest,
     FLOORPLAN_V2_OT_atlas_apply_existing,
+    FLOORPLAN_V2_OT_optimize_generated_meshes,
 )
 
 

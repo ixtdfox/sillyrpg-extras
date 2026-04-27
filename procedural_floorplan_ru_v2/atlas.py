@@ -494,6 +494,10 @@ def apply_atlas_to_collection(context) -> None:
         category, region = _resolve_region_for_object(obj, atlas_data, context.settings.seed)
         if not category or not region:
             continue
+        if obj.get("uv_baked") or obj.get("atlas_baked"):
+            if not obj.data.materials:
+                obj.data.materials.append(material_for(category))
+            continue
         obj.data.materials.clear()
         obj.data.materials.append(material_for(category))
         _assign_uv_to_bbox(obj, region, atlas_w, atlas_h)

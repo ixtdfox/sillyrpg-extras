@@ -28,6 +28,11 @@ class FLOORPLAN_V2_PT_panel(bpy.types.Panel):
         row.operator("floorplan_ru_v2.generate", icon="HOME")
         row.operator("floorplan_ru_v2.reset_defaults", icon="LOOP_BACK")
 
+        optimize_box = layout.box()
+        optimize_box.label(text="Оптимизация")
+        optimize_box.operator("floorplan_ru_v2.optimize_generated_meshes", icon="MOD_DECIM")
+        optimize_box.label(text="После ручных правок перед экспортом", icon="INFO")
+
         # Базовые числовые и служебные настройки генерации.
         box = layout.box()
         box.label(text="Общее")
