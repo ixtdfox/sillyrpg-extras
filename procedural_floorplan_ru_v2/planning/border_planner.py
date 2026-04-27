@@ -163,6 +163,8 @@ class BorderPlanner:
         wall_thickness: float,
         depth: float,
     ) -> float:
+        if run.orientation == "y":
+            return depth * 0.5
         return depth * 1.5
 
     def _corner_kind(
