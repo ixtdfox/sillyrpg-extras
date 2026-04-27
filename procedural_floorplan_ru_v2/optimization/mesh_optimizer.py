@@ -19,6 +19,8 @@ class OptimizationResult:
 class GeneratedMeshOptimizer:
     """Оптимизирует сгенерированные mesh-тайлы без пересчёта UV по общему bbox."""
 
+    debug = False
+
     SAFE_PARTS = {
         "floor",
         "roof",
@@ -46,6 +48,8 @@ class GeneratedMeshOptimizer:
             source_objects = [obj for obj in objects if not bool(obj.get("optimized_mesh", False))]
 
             if source_objects:
+                if self.debug and group_key and group_key[0] == "border":
+                    self.debug_border_group(group_key, source_objects)
                 try:
                     combined = self.combine_group(group_key, source_objects)
                 except Exception:
@@ -59,7 +63,8 @@ class GeneratedMeshOptimizer:
                 result.objects_removed += len(source_objects)
             elif selected_only and optimized_objects:
                 for obj in optimized_objects:
-                    self.remove_doubles(obj.data)
+                    if str(obj.get("building_part", "")) != "border":
+                        self.remove_doubles(obj.data)
                 result.groups_optimized += len(optimized_objects)
 
         result.skipped_objects += len([obj for obj in candidates if obj not in handled])
@@ -97,6 +102,7 @@ class GeneratedMeshOptimizer:
         mesh_objects = [obj for obj in objects if obj.type == "MESH" and obj.data is not None]
         if not mesh_objects:
             return None
+        source_bbox = self.world_bbox_for_objects(mesh_objects)
 
         verts_world: list[Vector] = []
         faces: list[list[int]] = []
@@ -154,7 +160,9 @@ class GeneratedMeshOptimizer:
         self._copy_group_properties(group_key, mesh_objects, combined_obj)
         try:
             self._link_like_sources(mesh_objects, combined_obj)
-            self.remove_doubles(combined_mesh)
+            if str(group_key[0]) != "border":
+                self.remove_doubles(combined_mesh)
+            self.warn_if_bbox_mismatch(group_key, source_bbox, self.world_bbox_for_object(combined_obj))
         except Exception:
             bpy.data.objects.remove(combined_obj, do_unlink=True)
             raise
@@ -206,6 +214,8 @@ class GeneratedMeshOptimizer:
                 self._prop(obj, "edge_side", ""),
                 self._prop(obj, "wall_orientation", ""),
                 self._prop(obj, "surface_type", ""),
+                self._border_run_token(obj),
+                self._border_line_token(obj),
             )
         if part in {"roof_railing", "terrace_railing"}:
             run_token = self._prop(
@@ -270,6 +280,7 @@ class GeneratedMeshOptimizer:
             "stair_facade_orientation",
             "atlas_category",
             "atlas_tile_id",
+            "boundary_run_id",
         ):
             value = self._shared_prop(sources, prop_name)
             if value is not None:
@@ -345,6 +356,81 @@ class GeneratedMeshOptimizer:
         if orientation == "y":
             return ("line_x", round(float(obj.location.x), 5))
         return ("tile", self._prop(obj, "tile_x", ""), self._prop(obj, "tile_y", ""))
+
+    def _border_run_token(self, obj: bpy.types.Object) -> str:
+        boundary_id = str(obj.get("boundary_run_id", ""))
+        parts = boundary_id.split(":")
+        if len(parts) >= 3:
+            try:
+                return f"Run{int(parts[2]):03d}"
+            except ValueError:
+                return f"Run{parts[2]}"
+        if boundary_id:
+            return boundary_id
+        return self._suffix((self._prop(obj, "edge_side", ""), self._line_anchor(obj)))
+
+    def _border_line_token(self, obj: bpy.types.Object) -> str:
+        orientation = str(obj.get("wall_orientation", ""))
+        if orientation == "x":
+            return f"LineY{round(float(obj.location.y), 5)}"
+        if orientation == "y":
+            return f"LineX{round(float(obj.location.x), 5)}"
+        return self._suffix(("Tile", self._prop(obj, "tile_x", ""), self._prop(obj, "tile_y", "")))
+
+    def world_bbox_for_objects(self, objects: list[bpy.types.Object]) -> tuple[Vector, Vector] | None:
+        boxes = [self.world_bbox_for_object(obj) for obj in objects]
+        boxes = [box for box in boxes if box is not None]
+        if not boxes:
+            return None
+        return (
+            Vector((min(box[0].x for box in boxes), min(box[0].y for box in boxes), min(box[0].z for box in boxes))),
+            Vector((max(box[1].x for box in boxes), max(box[1].y for box in boxes), max(box[1].z for box in boxes))),
+        )
+
+    def world_bbox_for_object(self, obj: bpy.types.Object) -> tuple[Vector, Vector] | None:
+        if obj.type != "MESH" or obj.data is None or not obj.data.vertices:
+            return None
+        points = [obj.matrix_world @ vertex.co for vertex in obj.data.vertices]
+        return (
+            Vector((min(point.x for point in points), min(point.y for point in points), min(point.z for point in points))),
+            Vector((max(point.x for point in points), max(point.y for point in points), max(point.z for point in points))),
+        )
+
+    def warn_if_bbox_mismatch(
+        self,
+        group_key: tuple,
+        source_bbox: tuple[Vector, Vector] | None,
+        optimized_bbox: tuple[Vector, Vector] | None,
+        *,
+        tolerance: float = 1e-5,
+    ) -> None:
+        if source_bbox is None or optimized_bbox is None:
+            return
+        deltas = [
+            abs(source_bbox[0].x - optimized_bbox[0].x),
+            abs(source_bbox[0].y - optimized_bbox[0].y),
+            abs(source_bbox[0].z - optimized_bbox[0].z),
+            abs(source_bbox[1].x - optimized_bbox[1].x),
+            abs(source_bbox[1].y - optimized_bbox[1].y),
+            abs(source_bbox[1].z - optimized_bbox[1].z),
+        ]
+        if max(deltas) > tolerance:
+            print(
+                "[procedural_floorplan_ru_v2] Mesh optimizer bbox mismatch",
+                group_key,
+                "source=",
+                tuple(tuple(round(component, 6) for component in vector) for vector in source_bbox),
+                "optimized=",
+                tuple(tuple(round(component, 6) for component in vector) for vector in optimized_bbox),
+            )
+
+    def debug_border_group(self, group_key: tuple, objects: list[bpy.types.Object]) -> None:
+        print(
+            "[procedural_floorplan_ru_v2] Border optimizer group",
+            group_key,
+            "sources=",
+            [obj.name for obj in objects],
+        )
 
     def _external_stair_name_key(self, obj: bpy.types.Object) -> str:
         name = obj.name

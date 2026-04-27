@@ -50,12 +50,11 @@ class BorderMeshFactory:
         return obj
 
     def _segment_geometry(self, context, segment: BorderSegment) -> tuple[float, float, float, tuple[float, float, float]]:
-        wall_thickness = float(context.settings.walls.wall_thickness)
         if segment.orientation == "x":
             start = round(segment.start - segment.cap_start + segment.trim_start, 6)
             end = round(segment.end + segment.cap_end - segment.trim_end, 6)
             center_x = round((start + end) * 0.5, 6)
-            center_y = round(segment.line + (wall_thickness if segment.side == "north" else -wall_thickness), 6)
+            center_y = round(segment.line + (segment.depth * 0.5 if segment.side == "north" else -segment.depth * 0.5), 6)
             return (
                 round(end - start, 6),
                 segment.depth,
@@ -66,7 +65,7 @@ class BorderMeshFactory:
         start = round(segment.start - segment.cap_start + segment.trim_start, 6)
         end = round(segment.end + segment.cap_end - segment.trim_end, 6)
         center_y = round((start + end) * 0.5, 6)
-        center_x = round(segment.line + (wall_thickness if segment.side == "east" else -wall_thickness), 6)
+        center_x = round(segment.line + (segment.depth * 0.5 if segment.side == "east" else -segment.depth * 0.5), 6)
         return (
             segment.depth,
             round(end - start, 6),

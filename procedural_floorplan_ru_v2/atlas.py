@@ -320,9 +320,6 @@ def _assign_uv_to_bbox(obj, region, atlas_w, atlas_h):
         return target_min + (target_max - target_min) * factor
 
     def polygon_axes(polygon):
-        if str(obj.get("building_part", "")) != "outer_wall":
-            return "x", "y"
-
         nx = abs(polygon.normal.x)
         ny = abs(polygon.normal.y)
         nz = abs(polygon.normal.z)
