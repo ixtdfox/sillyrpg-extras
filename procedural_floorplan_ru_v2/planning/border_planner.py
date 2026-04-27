@@ -163,9 +163,7 @@ class BorderPlanner:
         wall_thickness: float,
         depth: float,
     ) -> float:
-        if run.orientation == self.wall_planner.placement_policy.carrying_orientation:
-            return depth
-        return 0.0
+        return depth * 1.5
 
     def _corner_kind(
         self,

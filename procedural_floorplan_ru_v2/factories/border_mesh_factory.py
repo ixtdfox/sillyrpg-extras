@@ -55,24 +55,24 @@ class BorderMeshFactory:
         height = quantize_025(segment.height)
         normal_offset = depth
         if segment.orientation == "x":
-            start = quantize_025(segment.start - segment.cap_start + segment.trim_start)
-            end = quantize_025(segment.end + segment.cap_end - segment.trim_end)
+            start = round(segment.start - segment.cap_start + segment.trim_start, 6)
+            end = round(segment.end + segment.cap_end - segment.trim_end, 6)
             center_x = round((start + end) * 0.5, 6)
             center_y = round(segment.line + (normal_offset if segment.side == "north" else -normal_offset), 6)
             return (
-                quantize_025(end - start),
+                round(end - start, 6),
                 depth,
                 height,
                 (center_x, center_y, round(segment.base_z + height * 0.5, 6)),
             )
 
-        start = quantize_025(segment.start - segment.cap_start + segment.trim_start)
-        end = quantize_025(segment.end + segment.cap_end - segment.trim_end)
+        start = round(segment.start - segment.cap_start + segment.trim_start, 6)
+        end = round(segment.end + segment.cap_end - segment.trim_end, 6)
         center_y = round((start + end) * 0.5, 6)
         center_x = round(segment.line + (normal_offset if segment.side == "east" else -normal_offset), 6)
         return (
             depth,
-            quantize_025(end - start),
+            round(end - start, 6),
             height,
             (center_x, center_y, round(segment.base_z + height * 0.5, 6)),
         )
