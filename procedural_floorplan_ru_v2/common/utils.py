@@ -10,7 +10,9 @@ GRID_STEP_M = 0.5
 FLOOR_TILE_SIZE_M = 1.0
 FLOOR_THICKNESS_M = 0.10
 BORDER_TILE_SIZE_M = 1.0
-BORDER_TILE_OVERLAP_M = 0.05
+# Border tiles must meet exactly along a run. Corner caps/trims are applied
+# only to true run ends by the border planner, never to interior tile joints.
+BORDER_TILE_OVERLAP_M = 0.0
 WALL_GRID_STEP_M = 0.25
 
 

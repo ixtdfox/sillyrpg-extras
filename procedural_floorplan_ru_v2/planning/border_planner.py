@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from ..builders.wall_utils import split_interval
-from ..common.utils import BORDER_TILE_OVERLAP_M, BORDER_TILE_SIZE_M
+from ..common.utils import BORDER_TILE_SIZE_M
 from ..domain.borders import BorderSegment
 from ..domain.walls import WallRun
 from .wall_planner import WallPlanner
@@ -102,7 +102,6 @@ class BorderPlanner:
             tile_spans = split_interval(run.start, run.end, BORDER_TILE_SIZE_M)
             last_tile_index = len(tile_spans) - 1
             for tile_index, (tile_start, tile_end) in enumerate(tile_spans, start=0):
-                overlap_half = BORDER_TILE_OVERLAP_M * 0.5
                 segments.append(
                     BorderSegment(
                         border_type=border_type,
@@ -116,8 +115,8 @@ class BorderPlanner:
                         base_z=base_z,
                         story_index=story_index,
                         boundary_run_id=f"{border_type}:{story_index}:{run_index}:{tile_index + 1}",
-                        cap_start=(run_cap_start if tile_index == 0 else 0.0) + overlap_half,
-                        cap_end=(run_cap_end if tile_index == last_tile_index else 0.0) + overlap_half,
+                        cap_start=run_cap_start if tile_index == 0 else 0.0,
+                        cap_end=run_cap_end if tile_index == last_tile_index else 0.0,
                         trim_start=run_trim_start if tile_index == 0 else 0.0,
                         trim_end=run_trim_end if tile_index == last_tile_index else 0.0,
                     )

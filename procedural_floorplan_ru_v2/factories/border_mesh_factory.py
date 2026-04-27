@@ -4,7 +4,7 @@ import bpy
 
 from .. import atlas
 from ..builders.wall_utils import build_box_mesh
-from ..common.utils import FLOOR_TILE_SIZE_M, apply_story_object_context, link_object, tag_generated_object
+from ..common.utils import FLOOR_TILE_SIZE_M, apply_story_object_context, link_object, quantize_025, tag_generated_object
 from ..domain.borders import BorderSegment
 
 
@@ -50,27 +50,29 @@ class BorderMeshFactory:
         return obj
 
     def _segment_geometry(self, context, segment: BorderSegment) -> tuple[float, float, float, tuple[float, float, float]]:
+        depth = quantize_025(segment.depth)
+        height = quantize_025(segment.height)
         if segment.orientation == "x":
-            start = round(segment.start - segment.cap_start + segment.trim_start, 6)
-            end = round(segment.end + segment.cap_end - segment.trim_end, 6)
+            start = quantize_025(segment.start - segment.cap_start + segment.trim_start)
+            end = quantize_025(segment.end + segment.cap_end - segment.trim_end)
             center_x = round((start + end) * 0.5, 6)
-            center_y = round(segment.line + (segment.depth * 0.5 if segment.side == "north" else -segment.depth * 0.5), 6)
+            center_y = round(segment.line + (depth * 0.5 if segment.side == "north" else -depth * 0.5), 6)
             return (
-                round(end - start, 6),
-                segment.depth,
-                segment.height,
-                (center_x, center_y, round(segment.base_z + segment.height * 0.5, 6)),
+                quantize_025(end - start),
+                depth,
+                height,
+                (center_x, center_y, round(segment.base_z + height * 0.5, 6)),
             )
 
-        start = round(segment.start - segment.cap_start + segment.trim_start, 6)
-        end = round(segment.end + segment.cap_end - segment.trim_end, 6)
+        start = quantize_025(segment.start - segment.cap_start + segment.trim_start)
+        end = quantize_025(segment.end + segment.cap_end - segment.trim_end)
         center_y = round((start + end) * 0.5, 6)
-        center_x = round(segment.line + (segment.depth * 0.5 if segment.side == "east" else -segment.depth * 0.5), 6)
+        center_x = round(segment.line + (depth * 0.5 if segment.side == "east" else -depth * 0.5), 6)
         return (
-            segment.depth,
-            round(end - start, 6),
-            segment.height,
-            (center_x, center_y, round(segment.base_z + segment.height * 0.5, 6)),
+            depth,
+            quantize_025(end - start),
+            height,
+            (center_x, center_y, round(segment.base_z + height * 0.5, 6)),
         )
 
     def _tile_anchor(self, segment: BorderSegment) -> tuple[int, int]:
