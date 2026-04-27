@@ -271,6 +271,7 @@ class GeneratedMeshOptimizer:
             "edge_side",
             "wall_orientation",
             "border_type",
+            "border_wall_thickness",
             "stair_kind",
             "from_story",
             "to_story",

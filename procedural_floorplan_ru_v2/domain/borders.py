@@ -20,6 +20,7 @@ class BorderSegment:
     cap_end: float = 0.0
     trim_start: float = 0.0
     trim_end: float = 0.0
+    wall_thickness: float = 0.0
 
     @property
     def length(self) -> float:

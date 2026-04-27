@@ -35,6 +35,7 @@ class BorderMeshFactory:
         obj["border_type"] = segment.border_type
         obj["border_depth"] = float(segment.depth)
         obj["border_height"] = float(segment.height)
+        obj["border_wall_thickness"] = float(segment.wall_thickness)
         obj["wall_orientation"] = segment.orientation
         obj["edge_side"] = segment.side
         obj["boundary_run_id"] = segment.boundary_run_id
@@ -52,11 +53,12 @@ class BorderMeshFactory:
     def _segment_geometry(self, context, segment: BorderSegment) -> tuple[float, float, float, tuple[float, float, float]]:
         depth = quantize_025(segment.depth)
         height = quantize_025(segment.height)
+        normal_offset = depth
         if segment.orientation == "x":
             start = quantize_025(segment.start - segment.cap_start + segment.trim_start)
             end = quantize_025(segment.end + segment.cap_end - segment.trim_end)
             center_x = round((start + end) * 0.5, 6)
-            center_y = round(segment.line + (depth * 0.5 if segment.side == "north" else -depth * 0.5), 6)
+            center_y = round(segment.line + (normal_offset if segment.side == "north" else -normal_offset), 6)
             return (
                 quantize_025(end - start),
                 depth,
@@ -67,7 +69,7 @@ class BorderMeshFactory:
         start = quantize_025(segment.start - segment.cap_start + segment.trim_start)
         end = quantize_025(segment.end + segment.cap_end - segment.trim_end)
         center_y = round((start + end) * 0.5, 6)
-        center_x = round(segment.line + (depth * 0.5 if segment.side == "east" else -depth * 0.5), 6)
+        center_x = round(segment.line + (normal_offset if segment.side == "east" else -normal_offset), 6)
         return (
             depth,
             quantize_025(end - start),

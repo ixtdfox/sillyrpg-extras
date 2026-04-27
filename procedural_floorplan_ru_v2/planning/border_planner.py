@@ -113,6 +113,7 @@ class BorderPlanner:
                         depth=depth,
                         height=height,
                         base_z=base_z,
+                        wall_thickness=wall_thickness,
                         story_index=story_index,
                         boundary_run_id=f"{border_type}:{story_index}:{run_index}:{tile_index + 1}",
                         cap_start=run_cap_start if tile_index == 0 else 0.0,
@@ -131,7 +132,11 @@ class BorderPlanner:
         wall_thickness: float,
         depth: float,
     ) -> tuple[float, float, float, float]:
-        cap_start, cap_end, trim_start, trim_end = self.wall_planner._outer_corner_adjustments(run, footprint_tiles, depth)
+        cap_start, cap_end, trim_start, trim_end = self.wall_planner._outer_corner_adjustments(
+            run,
+            footprint_tiles,
+            depth,
+        )
         convex_join_extension = self._convex_corner_extension(
             run,
             wall_thickness=wall_thickness,
@@ -158,9 +163,9 @@ class BorderPlanner:
         wall_thickness: float,
         depth: float,
     ) -> float:
-        if run.orientation == "y":
-            return wall_thickness * 0.5
-        return wall_thickness + (depth * 0.5)
+        if run.orientation == self.wall_planner.placement_policy.carrying_orientation:
+            return depth
+        return 0.0
 
     def _corner_kind(
         self,
