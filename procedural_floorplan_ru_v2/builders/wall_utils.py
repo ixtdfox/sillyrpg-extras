@@ -7,6 +7,16 @@ from ..domain.walls import WallRun as PerimeterRun
 from ..domain.walls import WallSegment
 
 
+BOX_FACES_OUTWARD = [
+    (3, 2, 1, 0),
+    (4, 5, 6, 7),
+    (0, 1, 5, 4),
+    (1, 2, 6, 5),
+    (2, 3, 7, 6),
+    (3, 0, 4, 7),
+]
+
+
 # Добавляет один boundary interval в группу для последующего merge.
 # Как это работает:
 # входной отрезок сразу снапится к сетке 0.25 и кладётся в список по ключу
@@ -138,13 +148,5 @@ def build_box_mesh(mesh: bpy.types.Mesh, *, size_x: float, size_y: float, size_z
         (hx, hy, hz),
         (-hx, hy, hz),
     ]
-    faces = [
-        (0, 1, 2, 3),
-        (4, 5, 6, 7),
-        (0, 4, 5, 1),
-        (1, 5, 6, 2),
-        (2, 6, 7, 3),
-        (3, 7, 4, 0),
-    ]
-    mesh.from_pydata(verts, [], faces)
+    mesh.from_pydata(verts, [], BOX_FACES_OUTWARD)
     mesh.update()

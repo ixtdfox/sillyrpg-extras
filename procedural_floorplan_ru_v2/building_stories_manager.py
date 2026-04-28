@@ -7,7 +7,14 @@ import bpy
 from . import atlas
 from .building_manager import BuildingManager
 from .builders.external_stair_builder import ExternalStairBuilder
-from .common.utils import FLOOR_THICKNESS_M, ensure_child_collection, ensure_collection, quantize_025
+from .common.utils import (
+    FLOOR_THICKNESS_M,
+    create_story_inside_volume,
+    ensure_child_collection,
+    ensure_collection,
+    print_game_visibility_summary,
+    quantize_025,
+)
 from .config import GenerationSettings
 from .domain.building import BuildingPlan, StoryLayoutMode, StoryPlan, VerticalProfileMode
 from .planning.external_stair_planner import ExternalStairPlanner
@@ -64,6 +71,9 @@ class BuildingStoriesManager:
                 story_plan=story_plan,
             )
             self.story_pipeline.build_context(story_context)
+            inside_volume = create_story_inside_volume(story_context)
+            if inside_volume is not None:
+                story_context.created_objects.append(inside_volume)
             building_context.stories.append(story_context)
             building_context.created_objects.extend(story_context.created_objects)
 
@@ -72,6 +82,7 @@ class BuildingStoriesManager:
 
         if self.settings.atlas.enabled:
             atlas.apply_atlas_to_collection(building_context)
+        print_game_visibility_summary(collection)
         return building_context
 
     def _build_plan(self, footprint) -> BuildingPlan:

@@ -136,6 +136,148 @@ def apply_story_object_context(obj: bpy.types.Object, context) -> None:
     obj.name = f"Story{story_plan.story_index}_{obj.name}"
     obj["story_index"] = int(story_plan.story_index)
     obj["story_z_offset"] = float(story_plan.z_offset)
+    apply_game_visibility_metadata(obj, context)
+
+
+def apply_game_visibility_metadata(obj: bpy.types.Object, context) -> None:
+    """Adds the stable exported game visibility metadata contract."""
+    part = str(obj.get("building_part", ""))
+    if not part:
+        return
+
+    role = _game_visibility_role(part)
+    story_plan = getattr(context, "story_plan", None)
+    settings = getattr(context, "settings", None)
+    general_settings = getattr(settings, "general", None)
+    collection = getattr(context, "collection", None)
+    building_id = str(
+        getattr(general_settings, "collection_name", "")
+        or getattr(collection, "name", "")
+        or obj.name
+    )
+    story_index = int(getattr(story_plan, "story_index", obj.get("story_index", 0)))
+    story_z_offset = float(getattr(story_plan, "z_offset", obj.get("story_z_offset", 0.0)))
+
+    obj["game_visibility"] = True
+    obj["game_building_id"] = building_id
+    obj["game_story_index"] = story_index
+    obj["game_part"] = _game_part(obj, part)
+    obj["game_visibility_role"] = role
+    obj["game_occluder"] = role == "wall_halo"
+    obj["game_hide_when_above_player"] = role in {"wall_halo", "hide_above_player"}
+    obj["game_story_z_offset"] = story_z_offset
+
+    wall_height = obj.get("wall_height")
+    if wall_height is not None:
+        obj["game_wall_height"] = float(wall_height)
+    surface_type = obj.get("surface_type")
+    if surface_type is not None:
+        obj["game_surface_type"] = str(surface_type)
+    if part == "floor":
+        obj["game_inside_volume_source"] = True
+
+
+def _game_visibility_role(part: str) -> str:
+    if part in {"outer_wall", "inner_wall"}:
+        return "wall_halo"
+    if part in {"roof", "terrace", "floor", "ceiling", "roof_railing", "terrace_railing", "stair"}:
+        return "hide_above_player"
+    if part == "border":
+        return "hide_above_player"
+    if part == "visibility_volume":
+        return "inside_volume"
+    if part == "ground":
+        return "ground"
+    return "ignore"
+
+
+def _game_part(obj: bpy.types.Object, part: str) -> str:
+    if part == "border":
+        return str(obj.get("border_type", part))
+    return part
+
+
+def create_story_inside_volume(context) -> bpy.types.Object | None:
+    """Creates a simple exported helper volume for story-level inside detection."""
+    story_plan = getattr(context, "story_plan", None)
+    footprint = getattr(context, "footprint", None)
+    tiles = list(getattr(footprint, "tiles", []) or [])
+    if story_plan is None or not tiles:
+        return None
+
+    min_x = min(tile[0] for tile in tiles) * FLOOR_TILE_SIZE_M
+    min_y = min(tile[1] for tile in tiles) * FLOOR_TILE_SIZE_M
+    max_x = (max(tile[0] for tile in tiles) + 1) * FLOOR_TILE_SIZE_M
+    max_y = (max(tile[1] for tile in tiles) + 1) * FLOOR_TILE_SIZE_M
+    walls_settings = getattr(getattr(context, "settings", None), "walls", None)
+    height = float(getattr(walls_settings, "wall_height", FLOOR_TILE_SIZE_M))
+    story_z_offset = float(getattr(story_plan, "z_offset", 0.0))
+    verts = [
+        (min_x, min_y, 0.0),
+        (max_x, min_y, 0.0),
+        (max_x, max_y, 0.0),
+        (min_x, max_y, 0.0),
+        (min_x, min_y, height),
+        (max_x, min_y, height),
+        (max_x, max_y, height),
+        (min_x, max_y, height),
+    ]
+    edges = [
+        (0, 1),
+        (1, 2),
+        (2, 3),
+        (3, 0),
+        (4, 5),
+        (5, 6),
+        (6, 7),
+        (7, 4),
+        (0, 4),
+        (1, 5),
+        (2, 6),
+        (3, 7),
+    ]
+    mesh = bpy.data.meshes.new(f"Story{story_plan.story_index}_InsideVolumeMesh")
+    mesh.from_pydata(verts, edges, [])
+    mesh.update()
+    obj = bpy.data.objects.new("InsideVolume", mesh)
+    tag_generated_object(obj, "visibility_volume", tile_size=FLOOR_TILE_SIZE_M)
+    obj["game_inside_volume_source"] = True
+    obj["game_volume_kind"] = "aabb"
+    obj["game_volume_min"] = (min_x, min_y, story_z_offset)
+    obj["game_volume_max"] = (max_x, max_y, story_z_offset + height)
+    apply_story_object_context(obj, context)
+    obj.display_type = "WIRE"
+    obj.show_in_front = True
+    obj.hide_render = True
+    link_object(context.collection, obj)
+    return obj
+
+
+def print_game_visibility_summary(collection: bpy.types.Collection) -> None:
+    """Prints one compact summary line per generated building/story."""
+    stats: dict[tuple[str, int], dict[str, int]] = {}
+    for obj in iter_collection_objects_recursive(collection):
+        if not bool(obj.get("game_visibility", False)):
+            continue
+        building_id = str(obj.get("game_building_id", ""))
+        story_index = int(obj.get("game_story_index", obj.get("story_index", 0)))
+        role = str(obj.get("game_visibility_role", "ignore"))
+        bucket = stats.setdefault((building_id, story_index), {"wallHalo": 0, "hideAbove": 0, "insideVolumes": 0})
+        if role == "wall_halo":
+            bucket["wallHalo"] += 1
+        if bool(obj.get("game_hide_when_above_player", False)):
+            bucket["hideAbove"] += 1
+        if role == "inside_volume":
+            bucket["insideVolumes"] += 1
+    for (building_id, story_index), bucket in sorted(stats.items()):
+        print(
+            "[GameVisibilityMetadata]",
+            f"building={building_id}",
+            f"story={story_index}",
+            f"wallHalo={bucket['wallHalo']}",
+            f"hideAbove={bucket['hideAbove']}",
+            f"insideVolumes={bucket['insideVolumes']}",
+        )
 
 
 def iter_collection_objects_recursive(collection: bpy.types.Collection):

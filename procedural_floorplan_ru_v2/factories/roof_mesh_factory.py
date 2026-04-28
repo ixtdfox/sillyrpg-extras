@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import bpy
 
+from ..builders.wall_utils import BOX_FACES_OUTWARD
 from ..common.utils import FLOOR_THICKNESS_M, FLOOR_TILE_SIZE_M, apply_story_object_context, link_object, tag_generated_object
 
 
@@ -66,12 +67,8 @@ class RoofMeshFactory:
             )
             faces.extend(
                 [
-                    (start + 0, start + 1, start + 2, start + 3),
-                    (start + 4, start + 5, start + 6, start + 7),
-                    (start + 0, start + 4, start + 5, start + 1),
-                    (start + 1, start + 5, start + 6, start + 2),
-                    (start + 2, start + 6, start + 7, start + 3),
-                    (start + 3, start + 7, start + 4, start + 0),
+                    tuple(start + vertex_index for vertex_index in face)
+                    for face in BOX_FACES_OUTWARD
                 ]
             )
 

@@ -5,7 +5,7 @@ from mathutils import Vector
 
 import bpy
 
-from ..common.utils import ADDON_ID, iter_collection_objects_recursive
+from ..common.utils import ADDON_ID, iter_collection_objects_recursive, print_game_visibility_summary
 
 
 @dataclass
@@ -32,7 +32,7 @@ class GeneratedMeshOptimizer:
         "terrace_railing",
         "stair",
     }
-    UNSAFE_PARTS = {"door", "window", "decal", "room_metadata", "metadata", "helper"}
+    UNSAFE_PARTS = {"door", "window", "decal", "room_metadata", "metadata", "helper", "visibility_volume"}
 
     def optimize_collection(self, collection: bpy.types.Collection, *, selected_only: bool = False) -> OptimizationResult:
         result = OptimizationResult()
@@ -68,6 +68,7 @@ class GeneratedMeshOptimizer:
                 result.groups_optimized += len(optimized_objects)
 
         result.skipped_objects += len([obj for obj in candidates if obj not in handled])
+        print_game_visibility_summary(collection)
         return result
 
     def collect_candidates(self, collection: bpy.types.Collection, selected_only: bool = False) -> list[bpy.types.Object]:
@@ -144,7 +145,8 @@ class GeneratedMeshOptimizer:
         mesh_name = f"{self._group_name(group_key)}Mesh"
         combined_mesh = bpy.data.meshes.new(mesh_name)
         combined_mesh.from_pydata(verts_local, [], faces)
-        combined_mesh.update()
+        combined_mesh.validate(clean_customdata=False)
+        combined_mesh.update(calc_edges=True)
         for material in materials:
             combined_mesh.materials.append(material)
         for polygon, material_slot in zip(combined_mesh.polygons, face_materials):
@@ -188,16 +190,22 @@ class GeneratedMeshOptimizer:
         story = self._prop(obj, "story_index", None)
 
         if part == "floor":
-            return ("floor", story)
+            return self._with_game_group_key(obj, ("floor", story))
         if part in {"roof", "terrace"}:
-            return (part, story, self._prop(obj, "surface_type", part))
+            return self._with_game_group_key(
+                obj,
+                (part, story, self._prop(obj, "surface_type", part)),
+            )
         if part == "outer_wall":
-            return ("outer_wall", story, self._prop(obj, "edge_side", ""), self._prop(obj, "wall_orientation", ""))
+            return self._with_game_group_key(
+                obj,
+                ("outer_wall", story, self._prop(obj, "edge_side", ""), self._prop(obj, "wall_orientation", "")),
+            )
         if part == "inner_wall":
             boundary_id = self._prop(obj, "boundary_run_id", "")
             if boundary_id:
-                return ("inner_wall", story, boundary_id)
-            return (
+                return self._with_game_group_key(obj, ("inner_wall", story, boundary_id))
+            return self._with_game_group_key(obj, (
                 "inner_wall",
                 story,
                 self._prop(obj, "wall_orientation", ""),
@@ -205,9 +213,9 @@ class GeneratedMeshOptimizer:
                 self._prop(obj, "room_a_id", ""),
                 self._prop(obj, "room_b_id", ""),
                 self._line_anchor(obj),
-            )
+            ))
         if part == "border":
-            return (
+            return self._with_game_group_key(obj, (
                 "border",
                 story,
                 self._prop(obj, "border_type", ""),
@@ -216,22 +224,33 @@ class GeneratedMeshOptimizer:
                 self._prop(obj, "surface_type", ""),
                 self._border_run_token(obj),
                 self._border_line_token(obj),
-            )
+            ))
         if part in {"roof_railing", "terrace_railing"}:
             run_token = self._prop(
                 obj,
                 "run_id",
                 f"corner_{self._prop(obj, 'tile_x', round(float(obj.location.x), 4))}_{self._prop(obj, 'tile_y', round(float(obj.location.y), 4))}",
             )
-            return (
+            return self._with_game_group_key(obj, (
                 part,
                 story,
                 self._prop(obj, "surface_type", ""),
                 run_token,
-            )
+            ))
         if part == "stair":
-            return self._stair_group_key(obj, story)
+            return self._with_game_group_key(obj, self._stair_group_key(obj, story))
         return None
+
+    def _with_game_group_key(self, obj: bpy.types.Object, base_key: tuple) -> tuple:
+        return base_key + (
+            "game",
+            self._prop(obj, "game_building_id", ""),
+            self._prop(obj, "game_story_index", self._prop(obj, "story_index", "")),
+            self._prop(obj, "game_visibility_role", ""),
+            self._prop(obj, "game_occluder", ""),
+            self._prop(obj, "game_hide_when_above_player", ""),
+            self._prop(obj, "game_part", self._prop(obj, "building_part", "")),
+        )
 
     def _stair_group_key(self, obj: bpy.types.Object, story) -> tuple:
         stair_kind = self._prop(obj, "stair_kind", "internal")
@@ -282,12 +301,24 @@ class GeneratedMeshOptimizer:
             "atlas_category",
             "atlas_tile_id",
             "boundary_run_id",
+            "game_visibility",
+            "game_visibility_role",
+            "game_occluder",
+            "game_hide_when_above_player",
+            "game_inside_volume_source",
+            "game_building_id",
+            "game_story_index",
+            "game_part",
+            "game_wall_height",
+            "game_story_z_offset",
+            "game_surface_type",
         ):
             value = self._shared_prop(sources, prop_name)
             if value is not None:
                 target[prop_name] = value
 
     def _group_name(self, group_key: tuple) -> str:
+        group_key = self._base_group_key(group_key)
         part = str(group_key[0])
         story = group_key[1] if len(group_key) > 1 else None
         prefix = f"Story{story}_" if story not in {None, ""} else ""
@@ -309,6 +340,11 @@ class GeneratedMeshOptimizer:
                 return f"Stair_Story{group_key[1]}_to_Story{group_key[2]}_Optimized"
             return f"ExternalStair_{self._suffix(group_key[2:])}_Optimized"
         return f"{self._title_token(part)}_Optimized"
+
+    def _base_group_key(self, group_key: tuple) -> tuple:
+        if "game" not in group_key:
+            return group_key
+        return group_key[: group_key.index("game")]
 
     def _is_helper_or_decal(self, obj: bpy.types.Object) -> bool:
         if bool(obj.get("is_room_metadata", False)):

@@ -22,6 +22,26 @@ ATLAS_CATEGORIES = [
     ("stair_landings", "stair_landings", "Лестничные площадки"),
 ]
 
+OPAQUE_ATLAS_CATEGORIES = {
+    "walls",
+    "windows",
+    "wall_doors",
+    "outside_doors",
+    "inside_doors",
+    "floors",
+    "roofs",
+    "roof_borders",
+    "floor_bands",
+    "railings",
+    "stairs",
+    "stair_landings",
+}
+
+ALPHA_ATLAS_CATEGORIES = {
+    "glass",
+    "decals",
+}
+
 
 def _abs_path(path_str: str) -> str:
     if not path_str:
@@ -280,7 +300,11 @@ def _load_atlas_image(image_path: str):
         return None
 
 
-def _ensure_atlas_material(mat_name: str, image):
+def category_uses_alpha(category: str) -> bool:
+    return category in ALPHA_ATLAS_CATEGORIES
+
+
+def _ensure_atlas_material(mat_name: str, image, *, use_alpha: bool = False):
     mat = bpy.data.materials.get(mat_name)
     if mat is None:
         mat = bpy.data.materials.new(mat_name)
@@ -296,9 +320,16 @@ def _ensure_atlas_material(mat_name: str, image):
     tex.location = (-260, 0)
     tex.image = image
     node_tree.links.new(tex.outputs["Color"], bsdf.inputs["Base Color"])
-    node_tree.links.new(tex.outputs["Alpha"], bsdf.inputs["Alpha"])
+    if use_alpha:
+        node_tree.links.new(tex.outputs["Alpha"], bsdf.inputs["Alpha"])
+    else:
+        bsdf.inputs["Alpha"].default_value = 1.0
     node_tree.links.new(bsdf.outputs["BSDF"], out.inputs["Surface"])
-    mat.blend_method = "CLIP"
+    mat.blend_method = "CLIP" if use_alpha else "OPAQUE"
+    mat.alpha_threshold = 0.5 if use_alpha else 0.0
+    mat.use_backface_culling = False
+    mat.show_transparent_back = False
+    mat.use_screen_refraction = False
     return mat
 
 
@@ -479,9 +510,12 @@ def apply_atlas_to_collection(context) -> None:
     mat_cache = {}
 
     def material_for(category: str):
-        if category not in mat_cache:
-            mat_cache[category] = _ensure_atlas_material(f"Atlas_{category}", image)
-        return mat_cache[category]
+        use_alpha = category_uses_alpha(category)
+        key = (category, use_alpha)
+        if key not in mat_cache:
+            suffix = "Alpha" if use_alpha else "Opaque"
+            mat_cache[key] = _ensure_atlas_material(f"Atlas_{category}_{suffix}", image, use_alpha=use_alpha)
+        return mat_cache[key]
 
     from .common.utils import iter_collection_objects_recursive
 
