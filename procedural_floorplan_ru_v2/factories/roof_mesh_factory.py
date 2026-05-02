@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import bpy
 
-from ..builders.wall_utils import BOX_FACES_OUTWARD
+from ..common.tile_surface_mesh import build_tile_surface_mesh
 from ..common.utils import FLOOR_THICKNESS_M, FLOOR_TILE_SIZE_M, apply_story_object_context, link_object, tag_generated_object
 
 
@@ -40,40 +40,24 @@ class RoofMeshFactory:
             return None
 
         mesh = bpy.data.meshes.new(f"{object_name}Mesh")
-        verts: list[tuple[float, float, float]] = []
-        faces: list[tuple[int, int, int, int]] = []
         thickness = float(FLOOR_THICKNESS_M)
         base_z = float(context.settings.walls.wall_height)
-
-        for tile_x, tile_y in surface_tiles:
-            x0 = float(tile_x) * FLOOR_TILE_SIZE_M
-            y0 = float(tile_y) * FLOOR_TILE_SIZE_M
-            x1 = x0 + FLOOR_TILE_SIZE_M
-            y1 = y0 + FLOOR_TILE_SIZE_M
-            z0 = base_z
-            z1 = base_z + thickness
-            start = len(verts)
-            verts.extend(
-                [
-                    (x0, y0, z0),
-                    (x1, y0, z0),
-                    (x1, y1, z0),
-                    (x0, y1, z0),
-                    (x0, y0, z1),
-                    (x1, y0, z1),
-                    (x1, y1, z1),
-                    (x0, y1, z1),
-                ]
-            )
-            faces.extend(
-                [
-                    tuple(start + vertex_index for vertex_index in face)
-                    for face in BOX_FACES_OUTWARD
-                ]
-            )
-
-        mesh.from_pydata(verts, [], faces)
-        mesh.update()
+        before_faces = len(surface_tiles) * 6
+        build_tile_surface_mesh(
+            mesh,
+            surface_tiles,
+            tile_size=FLOOR_TILE_SIZE_M,
+            top_z=base_z + thickness,
+            bottom_z=base_z,
+            include_perimeter_sides=True,
+            include_bottom=False,
+        )
+        print(
+            "[MeshCleanup]",
+            f"{surface_type} faces before={before_faces}",
+            f"after={len(mesh.polygons)}",
+            f"internalRemoved={before_faces - len(mesh.polygons)}",
+        )
 
         obj = bpy.data.objects.new(object_name, mesh)
         tag_generated_object(obj, surface_type, tile_size=FLOOR_TILE_SIZE_M)

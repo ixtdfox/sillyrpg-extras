@@ -63,6 +63,16 @@ class GeneratedMeshOptimizer:
                 result.objects_removed += len(source_objects)
             elif selected_only and optimized_objects:
                 for obj in optimized_objects:
+                    if str(obj.get("building_part", "")) in {"outer_wall", "inner_wall"}:
+                        cleanup = self.cleanup_wall_mesh(obj.data)
+                        self._tag_wall_cleanup(obj, cleanup)
+                        if cleanup["opposite"] or cleanup["bottom"]:
+                            print(
+                                "[MeshCleanup]",
+                                f"wall group={obj.name}",
+                                f"removedInternalFaces={cleanup['opposite']}",
+                                f"removedBottomFaces={cleanup['bottom']}",
+                            )
                     if str(obj.get("building_part", "")) != "border":
                         self.remove_doubles(obj.data)
                 result.groups_optimized += len(optimized_objects)
@@ -162,6 +172,16 @@ class GeneratedMeshOptimizer:
         self._copy_group_properties(group_key, mesh_objects, combined_obj)
         try:
             self._link_like_sources(mesh_objects, combined_obj)
+            if str(group_key[0]) in {"outer_wall", "inner_wall"}:
+                cleanup = self.cleanup_wall_mesh(combined_mesh)
+                self._tag_wall_cleanup(combined_obj, cleanup)
+                if cleanup["opposite"] or cleanup["bottom"]:
+                    print(
+                        "[MeshCleanup]",
+                        f"wall group={combined_obj.name}",
+                        f"removedInternalFaces={cleanup['opposite']}",
+                        f"removedBottomFaces={cleanup['bottom']}",
+                    )
             if str(group_key[0]) != "border":
                 self.remove_doubles(combined_mesh)
             self.warn_if_bbox_mismatch(group_key, source_bbox, self.world_bbox_for_object(combined_obj))
@@ -182,6 +202,89 @@ class GeneratedMeshOptimizer:
             bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=threshold)
             bm.to_mesh(mesh)
             mesh.update()
+        finally:
+            bm.free()
+
+    def cleanup_wall_mesh(self, mesh: bpy.types.Mesh) -> dict[str, int]:
+        removed_opposite = self.remove_exact_opposite_faces(mesh)
+        removed_bottom = self.remove_bottom_faces(mesh)
+        return {
+            "opposite": removed_opposite,
+            "bottom": removed_bottom,
+        }
+
+    def remove_bottom_faces(self, mesh: bpy.types.Mesh, threshold: float = 0.999) -> int:
+        import bmesh
+
+        bm = bmesh.new()
+        try:
+            bm.from_mesh(mesh)
+            bm.normal_update()
+            faces_to_delete = [face for face in bm.faces if face.normal.z < -threshold]
+            removed = len(faces_to_delete)
+            if removed:
+                bmesh.ops.delete(bm, geom=faces_to_delete, context="FACES")
+                bm.to_mesh(mesh)
+                mesh.update()
+            return removed
+        finally:
+            bm.free()
+
+    def remove_exact_opposite_faces(self, mesh: bpy.types.Mesh, precision: int = 6) -> int:
+        import bmesh
+
+        bm = bmesh.new()
+        try:
+            bm.from_mesh(mesh)
+            bm.normal_update()
+            bm.faces.ensure_lookup_table()
+            buckets: dict[tuple[tuple[float, float, float], ...], list] = {}
+            for face in bm.faces:
+                key = tuple(
+                    sorted(
+                        (
+                            round(float(vertex.co.x), precision),
+                            round(float(vertex.co.y), precision),
+                            round(float(vertex.co.z), precision),
+                        )
+                        for vertex in face.verts
+                    )
+                )
+                buckets.setdefault(key, []).append(face)
+
+            faces_to_delete = []
+
+            def marked(face) -> bool:
+                return any(face is existing for existing in faces_to_delete)
+
+            for bucket_faces in buckets.values():
+                unused = [face for face in bucket_faces if face.is_valid]
+                while unused:
+                    face = unused.pop()
+                    if marked(face):
+                        continue
+                    match_index = None
+                    for index, other in enumerate(unused):
+                        if marked(other):
+                            continue
+                        if abs(face.calc_area() - other.calc_area()) > 1e-8:
+                            continue
+                        if face.normal.dot(other.normal) > -0.999:
+                            continue
+                        match_index = index
+                        break
+                    if match_index is None:
+                        continue
+                    other = unused.pop(match_index)
+                    faces_to_delete.append(face)
+                    faces_to_delete.append(other)
+
+            removed = len(faces_to_delete)
+            if removed:
+                bmesh.ops.delete(bm, geom=list(faces_to_delete), context="FACES")
+                bm.to_mesh(mesh)
+                mesh.update()
+            return removed
         finally:
             bm.free()
 
@@ -240,6 +343,12 @@ class GeneratedMeshOptimizer:
         if part == "stair":
             return self._with_game_group_key(obj, self._stair_group_key(obj, story))
         return None
+
+    def _tag_wall_cleanup(self, obj: bpy.types.Object, cleanup: dict[str, int]) -> None:
+        obj["mesh_cleanup_internal_faces_removed"] = True
+        obj["mesh_cleanup_bottom_faces_removed"] = True
+        obj["mesh_cleanup_removed_internal_face_count"] = int(cleanup["opposite"])
+        obj["mesh_cleanup_removed_bottom_face_count"] = int(cleanup["bottom"])
 
     def _with_game_group_key(self, obj: bpy.types.Object, base_key: tuple) -> tuple:
         return base_key + (

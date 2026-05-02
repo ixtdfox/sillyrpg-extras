@@ -21,10 +21,12 @@ class FloorBuilder(BaseBuilder):
             for opening in (story_plan.floor_openings if story_plan is not None else [])
             for tile in opening.tiles
         }
-        objects = [
-            self.floor_factory.create_tile(context, tile_x, tile_y, floor_tile_id)
+        floor_tiles = [
+            (tile_x, tile_y)
             for tile_x, tile_y in sorted(context.footprint.tiles)
             if (tile_x, tile_y) not in opening_tiles
         ]
+        floor_obj = self.floor_factory.create_floor_object(context, floor_tiles, floor_tile_id)
+        objects = [floor_obj] if floor_obj is not None else []
         context.created_objects.extend(objects)
         return objects
