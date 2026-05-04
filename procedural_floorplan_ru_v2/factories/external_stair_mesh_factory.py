@@ -31,6 +31,39 @@ class ExternalStairMeshFactory:
     def _should_create_door_landing(self, placement: ExternalStairPlacement) -> bool:
         return placement.story_index > 0
 
+    def _external_story_span(self, context) -> tuple[int, int]:
+        story_plan = getattr(context, "story_plan", None)
+        from_story = int(getattr(story_plan, "story_index", 0))
+        return from_story, from_story + 1
+
+    def _tag_external_stair_object(
+        self,
+        obj: bpy.types.Object,
+        context,
+        *,
+        stair_part: str,
+        from_story: int | None = None,
+        to_story: int | None = None,
+        story_index: int | None = None,
+        landing_story: int | None = None,
+    ) -> None:
+        default_from, default_to = self._external_story_span(context)
+        if from_story is None:
+            from_story = default_from
+        if to_story is None:
+            to_story = default_to
+        if story_index is None:
+            story_index = from_story
+        obj["stair_kind"] = "external"
+        obj["stair_part"] = stair_part
+        obj["story_index"] = int(story_index)
+        obj["from_story"] = int(from_story)
+        obj["to_story"] = int(to_story)
+        obj["game_visibility_behavior"] = "external_stair_connector"
+        obj["game_hide_when_above_player"] = False
+        if landing_story is not None:
+            obj["stair_landing_story"] = int(landing_story)
+
     def _create_landing_object(self, context, placement: ExternalStairPlacement, *, stair_index: int, landing_tile_id: str) -> bpy.types.Object:
         x0, y0, x1, y1 = placement.door_landing_bounds
         mesh = bpy.data.meshes.new(f"ExternalLandingMesh_{stair_index:03d}")
@@ -43,9 +76,15 @@ class ExternalStairMeshFactory:
         obj = bpy.data.objects.new(f"ExternalLanding_Story{placement.story_index:02d}", mesh)
         obj.location = ((x0 + x1) * 0.5, (y0 + y1) * 0.5, self.LANDING_THICKNESS * 0.5)
         tag_generated_object(obj, "stair", tile_x=int(x0), tile_y=int(y0))
-        obj["stair_kind"] = "external"
-        obj["stair_part"] = "landing"
-        obj["story_index"] = int(placement.story_index)
+        self._tag_external_stair_object(
+            obj,
+            context,
+            stair_part="landing",
+            from_story=max(0, int(placement.story_index) - 1),
+            to_story=int(placement.story_index),
+            story_index=int(placement.story_index),
+            landing_story=int(placement.story_index),
+        )
         obj["has_upward_flight"] = bool(placement.has_upward_flight)
         obj["stair_facade_orientation"] = placement.facade.orientation
         obj["stair_facade_side"] = placement.facade.side
@@ -131,6 +170,11 @@ class ExternalStairMeshFactory:
                     suffix="Landing_FreeSide",
                 )
             )
+        for obj in objects:
+            obj["story_index"] = int(placement.story_index)
+            obj["from_story"] = max(0, int(placement.story_index) - 1)
+            obj["to_story"] = int(placement.story_index)
+            obj["stair_landing_story"] = int(placement.story_index)
         return objects
 
     def _create_edge_post(
@@ -151,8 +195,7 @@ class ExternalStairMeshFactory:
         obj = bpy.data.objects.new(f"ExternalStairPost_{stair_index:03d}_{suffix}", mesh)
         obj.location = (x, y, base_z + (height * 0.5))
         tag_generated_object(obj, "stair", tile_x=int(x), tile_y=int(y))
-        obj["stair_kind"] = "external"
-        obj["stair_part"] = "rail_post"
+        self._tag_external_stair_object(obj, context, stair_part="rail_post")
         obj["atlas_category"] = "railings"
         if rail_tile_id:
             obj["atlas_tile_id"] = rail_tile_id
@@ -175,8 +218,7 @@ class ExternalStairMeshFactory:
         obj = bpy.data.objects.new(f"ExternalStairRail_{stair_index:03d}_{suffix}", mesh)
         obj.location = center
         tag_generated_object(obj, "stair", tile_x=int(center[0]), tile_y=int(center[1]))
-        obj["stair_kind"] = "external"
-        obj["stair_part"] = "rail"
+        self._tag_external_stair_object(obj, context, stair_part="rail")
         obj["atlas_category"] = "railings"
         if rail_tile_id:
             obj["atlas_tile_id"] = rail_tile_id
@@ -674,8 +716,7 @@ class ExternalStairMeshFactory:
         pitch = math.atan2(dz, horizontal)
         obj.rotation_euler = (0.0, -pitch, yaw)
         tag_generated_object(obj, "stair", tile_x=int(obj.location.x), tile_y=int(obj.location.y))
-        obj["stair_kind"] = "external"
-        obj["stair_part"] = "rail"
+        self._tag_external_stair_object(obj, context, stair_part="rail")
         obj["atlas_category"] = "railings"
         if rail_tile_id:
             obj["atlas_tile_id"] = rail_tile_id
@@ -869,8 +910,8 @@ class ExternalStairMeshFactory:
         obj = bpy.data.objects.new(name, mesh)
         obj.location = center
         tag_generated_object(obj, "stair", tile_x=int(center[0]), tile_y=int(center[1]))
-        obj["stair_kind"] = "external"
-        obj["stair_part"] = stair_part
+        landing_story = self._external_story_span(context)[0] if "landing" in stair_part else None
+        self._tag_external_stair_object(obj, context, stair_part=stair_part, landing_story=landing_story)
         obj["atlas_category"] = "stairs" if stair_part == "tread" or stair_part == "stringer" else "stair_landings"
         if tile_id:
             obj["atlas_tile_id"] = tile_id
@@ -903,8 +944,7 @@ class ExternalStairMeshFactory:
         pitch = math.atan2(dz, horizontal)
         obj.rotation_euler = (0.0, -pitch, yaw)
         tag_generated_object(obj, "stair", tile_x=int(obj.location.x), tile_y=int(obj.location.y))
-        obj["stair_kind"] = "external"
-        obj["stair_part"] = "stringer"
+        self._tag_external_stair_object(obj, context, stair_part="stringer")
         obj["atlas_category"] = "stairs"
         if tile_id:
             obj["atlas_tile_id"] = tile_id

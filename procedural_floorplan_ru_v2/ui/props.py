@@ -59,6 +59,7 @@ DEFAULTS = {
     "WINDOW_MIN_EDGE_OFFSET": 1.0,
     "STAIRS_ENABLED": True,
     "STAIR_MODE": "internal",
+    "GENERATE_STAIR_NAV_CHECKPOINTS": True,
     "STAIR_WIDTH": 1.05,
     "STAIR_LANDING_SIZE": 1.05,
     "STAIR_MID_LANDING_SIZE": 1.45,
@@ -458,6 +459,7 @@ def apply_defaults_to_props(props) -> None:
     props.window_min_edge_offset = DEFAULTS["WINDOW_MIN_EDGE_OFFSET"]
     props.stairs_enabled = DEFAULTS["STAIRS_ENABLED"]
     props.stair_mode = DEFAULTS["STAIR_MODE"]
+    props.generate_stair_nav_checkpoints = DEFAULTS["GENERATE_STAIR_NAV_CHECKPOINTS"]
     props.stair_width = DEFAULTS["STAIR_WIDTH"]
     props.stair_landing_size = DEFAULTS["STAIR_LANDING_SIZE"]
     props.stair_mid_landing_size = DEFAULTS["STAIR_MID_LANDING_SIZE"]
@@ -822,6 +824,11 @@ class FloorplanV2Settings(bpy.types.PropertyGroup):
         description="Режим генерации лестницы: внутренняя или внешняя",
         items=STAIR_MODE_ITEMS,
         default=DEFAULTS["STAIR_MODE"],
+    )
+    generate_stair_nav_checkpoints: BoolProperty(
+        name="Nav checkpoints",
+        description="Создавать редактируемые контрольные точки навигации для лестниц",
+        default=DEFAULTS["GENERATE_STAIR_NAV_CHECKPOINTS"],
     )
     stair_width: FloatProperty(
         name="Ширина лестницы",

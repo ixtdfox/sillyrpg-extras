@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from ..factories.external_stair_mesh_factory import ExternalStairMeshFactory
+from ..navigation import create_external_stair_navigation
 from ..planning.external_stair_planner import ExternalStairPlanner
 
 
@@ -24,6 +25,13 @@ class ExternalStairBuilder:
                 story_context,
                 placement,
                 stair_index=placement.story_index + 1,
+            )
+            stair_objects.extend(
+                create_external_stair_navigation(
+                    story_context,
+                    placement,
+                    stair_index=placement.story_index + 1,
+                )
             )
             if placement.switchback_placement is not None:
                 story_context.stair_placements.append(placement)

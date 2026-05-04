@@ -9,6 +9,7 @@ from .. import atlas
 from ..building_stories_manager import BuildingStoriesManager
 from ..building_manager import GenerationContext, settings_from_props
 from ..common.utils import ensure_collection, focus_generated_objects
+from ..navigation import regenerate_existing_stair_navigation, set_selected_stair_navigation_visibility, set_stair_navigation_visibility, validate_stair_navigation
 from ..optimization import GeneratedMeshOptimizer
 from .props import apply_defaults_to_props
 
@@ -191,6 +192,100 @@ class FLOORPLAN_V2_OT_optimize_generated_meshes(bpy.types.Operator):
             self.report({"ERROR"}, f"Не удалось оптимизировать меши: {exc}")
             return {"CANCELLED"}
 
+
+class FLOORPLAN_V2_OT_show_stair_nav(bpy.types.Operator):
+    """Показывает редактируемые nav checkpoint objects во viewport."""
+
+    bl_idname = "floorplan_ru_v2.show_stair_nav"
+    bl_label = "Show Stair Nav"
+    bl_description = "Показать navigation checkpoint objects лестниц"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        props = context.scene.floorplan_ru_v2_settings
+        collection = ensure_collection(context.scene, str(props.collection_name), delete_old=False)
+        count = set_stair_navigation_visibility(collection, visible=True)
+        self.report({"INFO"}, f"Показано stair nav objects: {count}")
+        return {"FINISHED"}
+
+
+class FLOORPLAN_V2_OT_hide_stair_nav(bpy.types.Operator):
+    """Скрывает nav checkpoint objects во viewport, оставляя их экспортируемыми узлами."""
+
+    bl_idname = "floorplan_ru_v2.hide_stair_nav"
+    bl_label = "Hide Stair Nav"
+    bl_description = "Скрыть navigation checkpoint objects лестниц во viewport"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        props = context.scene.floorplan_ru_v2_settings
+        collection = ensure_collection(context.scene, str(props.collection_name), delete_old=False)
+        count = set_stair_navigation_visibility(collection, visible=False)
+        self.report({"INFO"}, f"Скрыто stair nav objects: {count}")
+        return {"FINISHED"}
+
+
+class FLOORPLAN_V2_OT_show_selected_stair_nav(bpy.types.Operator):
+    """Показывает debug только для выбранного stair_id."""
+
+    bl_idname = "floorplan_ru_v2.show_selected_stair_nav"
+    bl_label = "Show Selected Stair Nav Only"
+    bl_description = "Показать checkpoint-и и path preview только выбранной лестницы"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        props = context.scene.floorplan_ru_v2_settings
+        collection = ensure_collection(context.scene, str(props.collection_name), delete_old=False)
+        count, stair_id = set_selected_stair_navigation_visibility(collection, context.selected_objects)
+        if stair_id is None:
+            self.report({"WARNING"}, "Выберите stair connector, checkpoint или path preview")
+            return {"FINISHED"}
+        self.report({"INFO"}, f"Показан только stair_id={stair_id}: nav objects={count}")
+        return {"FINISHED"}
+
+
+class FLOORPLAN_V2_OT_validate_stair_nav(bpy.types.Operator):
+    """Проверяет stair connector/checkpoint metadata and ordering."""
+
+    bl_idname = "floorplan_ru_v2.validate_stair_nav"
+    bl_label = "Validate Stair Navigation"
+    bl_description = "Проверить navigation checkpoint-и лестниц"
+
+    def execute(self, context):
+        props = context.scene.floorplan_ru_v2_settings
+        collection = ensure_collection(context.scene, str(props.collection_name), delete_old=False)
+        result = validate_stair_navigation(collection)
+        for warning in result.warnings:
+            print(f"[StairNavigationValidation] WARNING {warning}")
+        if result.ok:
+            message = f"Stair nav OK: connectors={result.connector_count}, checkpoints={result.checkpoint_count}"
+            print(f"[StairNavigationValidation] {message}")
+            self.report({"INFO"}, message)
+            return {"FINISHED"}
+        message = f"Stair nav warnings={len(result.warnings)}; см. console"
+        print(f"[StairNavigationValidation] {message}")
+        self.report({"WARNING"}, message)
+        return {"FINISHED"}
+
+
+class FLOORPLAN_V2_OT_regenerate_stair_nav(bpy.types.Operator):
+    """Явно пересоздаёт checkpoint-и из сохранённой centerline metadata."""
+
+    bl_idname = "floorplan_ru_v2.regenerate_stair_nav"
+    bl_label = "Regenerate Stair Nav Checkpoints"
+    bl_description = "Пересоздать stair navigation checkpoint-и по сохранённой centerline"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        props = context.scene.floorplan_ru_v2_settings
+        collection = ensure_collection(context.scene, str(props.collection_name), delete_old=False)
+        count = regenerate_existing_stair_navigation(collection)
+        if count <= 0:
+            self.report({"WARNING"}, "Нет stair_connector с сохранённой centerline; сгенерируйте здание заново")
+            return {"FINISHED"}
+        self.report({"INFO"}, f"Пересоздано stair nav connector-ов: {count}")
+        return {"FINISHED"}
+
 classes = (
     FLOORPLAN_V2_OT_generate,
     FLOORPLAN_V2_OT_reset_defaults,
@@ -198,6 +293,11 @@ classes = (
     FLOORPLAN_V2_OT_atlas_save_manifest,
     FLOORPLAN_V2_OT_atlas_apply_existing,
     FLOORPLAN_V2_OT_optimize_generated_meshes,
+    FLOORPLAN_V2_OT_show_stair_nav,
+    FLOORPLAN_V2_OT_hide_stair_nav,
+    FLOORPLAN_V2_OT_show_selected_stair_nav,
+    FLOORPLAN_V2_OT_validate_stair_nav,
+    FLOORPLAN_V2_OT_regenerate_stair_nav,
 )
 
 

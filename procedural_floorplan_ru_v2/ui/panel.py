@@ -125,6 +125,7 @@ class FLOORPLAN_V2_PT_panel(bpy.types.Panel):
         sub = col.column(align=True)
         sub.enabled = props.stairs_enabled
         sub.prop(props, "stair_mode")
+        sub.prop(props, "generate_stair_nav_checkpoints")
         sub.prop(props, "stair_width")
         sub.prop(props, "stair_landing_size")
         sub.prop(props, "stair_mid_landing_size")
@@ -133,6 +134,12 @@ class FLOORPLAN_V2_PT_panel(bpy.types.Panel):
         sub.prop(props, "stair_min_free_area")
         sub.prop(props, "stair_door_clearance")
         sub.prop(props, "stair_window_clearance")
+        nav_row = sub.row(align=True)
+        nav_row.operator("floorplan_ru_v2.show_stair_nav", icon="HIDE_OFF")
+        nav_row.operator("floorplan_ru_v2.hide_stair_nav", icon="HIDE_ON")
+        sub.operator("floorplan_ru_v2.show_selected_stair_nav", icon="RESTRICT_SELECT_OFF")
+        sub.operator("floorplan_ru_v2.validate_stair_nav", icon="CHECKMARK")
+        sub.operator("floorplan_ru_v2.regenerate_stair_nav", icon="FILE_REFRESH")
 
         box = layout.box()
         box.label(text="Ограждение на крыше")

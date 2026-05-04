@@ -3,6 +3,7 @@ from __future__ import annotations
 import bpy
 
 from ..factories.stair_mesh_factory import StairMeshFactory
+from ..navigation import create_internal_stair_navigation
 from ..planning.stair_planner import StairPlanner
 from .base_builder import BaseBuilder
 
@@ -43,6 +44,12 @@ class StairBuilder(BaseBuilder):
             placement,
             stair_index=len(context.stair_placements),
         )
+        nav_objects = create_internal_stair_navigation(
+            context,
+            placement,
+            stair_index=len(context.stair_placements),
+        )
+        objects.extend(nav_objects)
         context.stair_objects.extend(objects)
         context.created_objects.extend(objects)
         return objects

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from mathutils import Vector
 
@@ -356,6 +357,7 @@ class GeneratedMeshOptimizer:
             self._prop(obj, "game_building_id", ""),
             self._prop(obj, "game_story_index", self._prop(obj, "story_index", "")),
             self._prop(obj, "game_visibility_role", ""),
+            self._prop(obj, "game_visibility_behavior", ""),
             self._prop(obj, "game_occluder", ""),
             self._prop(obj, "game_hide_when_above_player", ""),
             self._prop(obj, "game_part", self._prop(obj, "building_part", "")),
@@ -369,8 +371,13 @@ class GeneratedMeshOptimizer:
                 "stair",
                 "external",
                 self._prop(obj, "story_index", story),
+                self._prop(obj, "from_story", ""),
+                self._prop(obj, "to_story", ""),
                 self._prop(obj, "stair_facade_side", ""),
                 self._prop(obj, "stair_facade_orientation", ""),
+                self._prop(obj, "stair_part", ""),
+                self._prop(obj, "stair_segment_id", ""),
+                self._prop(obj, "stair_flight_id", ""),
                 name_key,
             )
         return (
@@ -392,6 +399,8 @@ class GeneratedMeshOptimizer:
         target["atlas_baked"] = True
         target["source_object_count"] = len(sources)
         target["building_part"] = "stair" if part == "stair" else part
+        if part == "stair":
+            target["part"] = "stair"
 
         for prop_name in (
             "story_index",
@@ -401,6 +410,10 @@ class GeneratedMeshOptimizer:
             "border_type",
             "border_wall_thickness",
             "stair_kind",
+            "stair_part",
+            "stair_landing_story",
+            "stair_segment_id",
+            "stair_flight_id",
             "from_story",
             "to_story",
             "stair_orientation",
@@ -412,6 +425,7 @@ class GeneratedMeshOptimizer:
             "boundary_run_id",
             "game_visibility",
             "game_visibility_role",
+            "game_visibility_behavior",
             "game_occluder",
             "game_hide_when_above_player",
             "game_inside_volume_source",
@@ -579,9 +593,12 @@ class GeneratedMeshOptimizer:
         )
 
     def _external_stair_name_key(self, obj: bpy.types.Object) -> str:
-        name = obj.name
+        name = re.sub(r"^Story\d+_", "", str(obj.name))
         if name.startswith("ExtStair_"):
-            return "_".join(name.split("_")[:2])
+            parts = name.split("_")
+            if len(parts) >= 3:
+                return "_".join(parts[:3])
+            return "_".join(parts[:2])
         if name.startswith("ExternalStair"):
             return "_".join(name.split("_")[:2])
         if name.startswith("ExternalLanding"):

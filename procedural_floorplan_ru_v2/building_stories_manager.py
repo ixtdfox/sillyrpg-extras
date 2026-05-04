@@ -17,6 +17,7 @@ from .common.utils import (
 )
 from .config import GenerationSettings
 from .domain.building import BuildingPlan, StoryLayoutMode, StoryPlan, VerticalProfileMode
+from .navigation import parent_objects_to_building_root
 from .planning.external_stair_planner import ExternalStairPlanner
 from .planning.room_planner import RoomPlanner
 from .planning.shape_footprint_generator import ShapeFootprintGenerator
@@ -79,6 +80,10 @@ class BuildingStoriesManager:
 
         if self.settings.stairs.enabled and self.settings.stairs.mode.value == "external":
             self.external_stair_builder.build_building(building_context)
+
+        root = parent_objects_to_building_root(collection, building_context.created_objects)
+        if root not in building_context.created_objects:
+            building_context.created_objects.append(root)
 
         if self.settings.atlas.enabled:
             atlas.apply_atlas_to_collection(building_context)

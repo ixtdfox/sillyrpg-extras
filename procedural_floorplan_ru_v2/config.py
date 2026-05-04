@@ -100,6 +100,7 @@ class WindowSettings:
 class StairSettings:
     enabled: bool
     mode: StairMode
+    generate_nav_checkpoints: bool
     width: float
     landing_size: float
     mid_landing_size: float
@@ -466,6 +467,7 @@ def settings_from_props(props) -> GenerationSettings:
         stairs=StairSettings(
             enabled=bool(props.stairs_enabled),
             mode=StairMode(str(props.stair_mode)),
+            generate_nav_checkpoints=bool(getattr(props, "generate_stair_nav_checkpoints", True)),
             width=max(0.25, quantize_025(float(props.stair_width))),
             landing_size=max(0.25, quantize_025(float(props.stair_landing_size))),
             mid_landing_size=max(0.25, quantize_025(float(props.stair_mid_landing_size))),

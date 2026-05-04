@@ -112,11 +112,26 @@ def clear_collection(collection: bpy.types.Collection) -> None:
     """
     objects = list(collection.objects)
     for obj in objects:
+        if _preserve_on_generated_clear(obj):
+            continue
         bpy.data.objects.remove(obj, do_unlink=True)
     child_collections = list(collection.children)
     for child in child_collections:
+        if _collection_contains_preserved_objects(child):
+            continue
         clear_collection(child)
         bpy.data.collections.remove(child)
+
+
+def _preserve_on_generated_clear(obj: bpy.types.Object) -> bool:
+    """Keeps editable navigation helpers and their building root across regeneration."""
+    return bool(obj.get("nav_kind", "")) or bool(obj.get("building_root", False))
+
+
+def _collection_contains_preserved_objects(collection: bpy.types.Collection) -> bool:
+    if any(_preserve_on_generated_clear(obj) for obj in collection.objects):
+        return True
+    return any(_collection_contains_preserved_objects(child) for child in collection.children)
 
 
 def link_object(collection: bpy.types.Collection, obj: bpy.types.Object) -> None:
@@ -141,11 +156,13 @@ def apply_story_object_context(obj: bpy.types.Object, context) -> None:
 
 def apply_game_visibility_metadata(obj: bpy.types.Object, context) -> None:
     """Adds the stable exported game visibility metadata contract."""
-    part = str(obj.get("building_part", ""))
+    part = str(obj.get("building_part", obj.get("part", ""))).lower()
     if not part:
         return
 
-    role = _game_visibility_role(part)
+    stair_kind = str(obj.get("stair_kind", "")).lower()
+    is_external_stair = part == "stair" and stair_kind == "external"
+    role = "ignore" if is_external_stair else _game_visibility_role(part)
     story_plan = getattr(context, "story_plan", None)
     settings = getattr(context, "settings", None)
     general_settings = getattr(settings, "general", None)
@@ -163,8 +180,10 @@ def apply_game_visibility_metadata(obj: bpy.types.Object, context) -> None:
     obj["game_story_index"] = story_index
     obj["game_part"] = _game_part(obj, part)
     obj["game_visibility_role"] = role
+    if is_external_stair:
+        obj["game_visibility_behavior"] = "external_stair_connector"
     obj["game_occluder"] = role == "wall_halo"
-    obj["game_hide_when_above_player"] = role in {"wall_halo", "hide_above_player"}
+    obj["game_hide_when_above_player"] = False if is_external_stair else role in {"wall_halo", "hide_above_player"}
     obj["game_story_z_offset"] = story_z_offset
 
     wall_height = obj.get("wall_height")
