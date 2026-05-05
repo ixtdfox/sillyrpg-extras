@@ -4,11 +4,13 @@ import json
 import random
 
 import bpy
+from mathutils import Matrix, Vector
 
 from .. import atlas
 from ..building_stories_manager import BuildingStoriesManager
 from ..building_manager import GenerationContext, settings_from_props
 from ..common.utils import ensure_collection, focus_generated_objects
+from ..game_grid import GAME_TILE_SIZE_M, snap_value_to_game_grid
 from ..navigation import regenerate_existing_stair_navigation, set_selected_stair_navigation_visibility, set_stair_navigation_visibility, validate_stair_navigation
 from ..optimization import GeneratedMeshOptimizer
 from .props import apply_defaults_to_props
@@ -193,6 +195,96 @@ class FLOORPLAN_V2_OT_optimize_generated_meshes(bpy.types.Operator):
             return {"CANCELLED"}
 
 
+def _collection_objects_recursive(collection: bpy.types.Collection) -> list[bpy.types.Object]:
+    """Returns all objects linked to a collection and its child collections once."""
+    objects: list[bpy.types.Object] = []
+    seen: set[int] = set()
+
+    def visit(current: bpy.types.Collection) -> None:
+        for obj in current.objects:
+            key = obj.as_pointer()
+            if key in seen:
+                continue
+            seen.add(key)
+            objects.append(obj)
+        for child in current.children:
+            visit(child)
+
+    visit(collection)
+    return objects
+
+
+def _object_world_bbox_xz(obj: bpy.types.Object) -> list[tuple[float, float]]:
+    """Returns world-space X/Z bbox points for objects with real bounds."""
+    if not getattr(obj, "bound_box", None):
+        return []
+    if all(abs(coord) < 1e-12 for corner in obj.bound_box for coord in corner):
+        return []
+    matrix = obj.matrix_world
+    return [(point.x, point.z) for point in (matrix @ Vector(corner) for corner in obj.bound_box)]
+
+
+def _collection_bbox_min_xz(objects: list[bpy.types.Object]) -> tuple[float, float] | None:
+    points: list[tuple[float, float]] = []
+    for obj in objects:
+        points.extend(_object_world_bbox_xz(obj))
+    if not points:
+        return None
+    return min(point[0] for point in points), min(point[1] for point in points)
+
+
+def _top_level_objects_within(objects: list[bpy.types.Object]) -> list[bpy.types.Object]:
+    object_keys = {obj.as_pointer() for obj in objects}
+    return [obj for obj in objects if obj.parent is None or obj.parent.as_pointer() not in object_keys]
+
+
+class FLOORPLAN_V2_OT_align_building_to_game_grid(bpy.types.Operator):
+    """Сдвигает сгенерированное здание на метрическую grid-сетку игры."""
+
+    bl_idname = "floorplan_ru_v2.align_building_to_game_grid"
+    bl_label = "Выровнять по сетке игры"
+    bl_description = "Сдвигает сгенеренное здание так, чтобы bbox min X/Z лёг на tile grid игры"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        props = context.scene.floorplan_ru_v2_settings
+        collection_name = str(props.collection_name)
+        collection = bpy.data.collections.get(collection_name)
+        if collection is None:
+            self.report({"WARNING"}, f"Коллекция не найдена: {collection_name}")
+            return {"CANCELLED"}
+
+        objects = _collection_objects_recursive(collection)
+        if not objects:
+            self.report({"WARNING"}, f"Коллекция пуста: {collection_name}")
+            return {"CANCELLED"}
+
+        bbox_min = _collection_bbox_min_xz(objects)
+        if bbox_min is None:
+            self.report({"WARNING"}, "В коллекции нет объектов с bbox для выравнивания")
+            return {"CANCELLED"}
+
+        min_x, min_z = bbox_min
+        snapped_min_x = snap_value_to_game_grid(min_x, GAME_TILE_SIZE_M)
+        snapped_min_z = snap_value_to_game_grid(min_z, GAME_TILE_SIZE_M)
+        shift_x = snapped_min_x - min_x
+        shift_z = snapped_min_z - min_z
+
+        if abs(shift_x) < 1e-6 and abs(shift_z) < 1e-6:
+            self.report({"INFO"}, f"Здание уже выровнено по сетке игры: tile={GAME_TILE_SIZE_M:.3f}m")
+            return {"FINISHED"}
+
+        shift = Matrix.Translation((shift_x, 0.0, shift_z))
+        for obj in _top_level_objects_within(objects):
+            obj.matrix_world = shift @ obj.matrix_world
+
+        self.report(
+            {"INFO"},
+            f"Здание выровнено по сетке игры: shift=({shift_x:.3f}, 0.000, {shift_z:.3f}), tile={GAME_TILE_SIZE_M:.3f}m",
+        )
+        return {"FINISHED"}
+
+
 class FLOORPLAN_V2_OT_show_stair_nav(bpy.types.Operator):
     """Показывает редактируемые nav checkpoint objects во viewport."""
 
@@ -293,6 +385,7 @@ classes = (
     FLOORPLAN_V2_OT_atlas_save_manifest,
     FLOORPLAN_V2_OT_atlas_apply_existing,
     FLOORPLAN_V2_OT_optimize_generated_meshes,
+    FLOORPLAN_V2_OT_align_building_to_game_grid,
     FLOORPLAN_V2_OT_show_stair_nav,
     FLOORPLAN_V2_OT_hide_stair_nav,
     FLOORPLAN_V2_OT_show_selected_stair_nav,

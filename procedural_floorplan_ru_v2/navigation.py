@@ -46,6 +46,15 @@ class StairNavigationValidationResult:
     checkpoint_count: int
 
 
+@dataclass(frozen=True)
+class GameNavigationValidationResult:
+    ok: bool
+    warnings: tuple[str, ...]
+    object_count: int
+    blocker_count: int
+    floor_count: int
+
+
 def ensure_building_root(collection: bpy.types.Collection) -> bpy.types.Object:
     for obj in collection.objects:
         if bool(obj.get("building_root", False)) and obj.get("generated_by") == ADDON_ID:
@@ -248,6 +257,69 @@ def validate_stair_navigation(collection: bpy.types.Collection) -> StairNavigati
     )
 
 
+def validate_game_navigation_metadata(collection: bpy.types.Collection) -> GameNavigationValidationResult:
+    warnings: list[str] = []
+    nav_objects = 0
+    blockers = 0
+    floors = 0
+
+    for obj in _iter_collection_objects_recursive(collection):
+        part = str(obj.get("building_part", "")).lower()
+        nav_kind = str(obj.get("nav_kind", ""))
+        generated = obj.get("generated_by") == ADDON_ID
+        if generated and part and not bool(obj.get("game_nav", False)):
+            warnings.append(f"{obj.name}: generated {part} missing game_nav metadata")
+            continue
+        if not bool(obj.get("game_nav", False)):
+            continue
+
+        nav_objects += 1
+        game_nav_kind = str(obj.get("game_nav_kind", ""))
+        footprint = str(obj.get("game_nav_footprint", ""))
+        blocks_movement = bool(obj.get("game_nav_blocks_movement", False))
+        blocks_vision = bool(obj.get("game_nav_blocks_vision", False))
+
+        if game_nav_kind == "floor":
+            floors += 1
+            if "game_nav_story_index" not in obj:
+                warnings.append(f"{obj.name}: floor nav metadata missing game_nav_story_index")
+            if footprint == "none":
+                warnings.append(f"{obj.name}: floor nav metadata must use a non-none footprint")
+            if blocks_movement:
+                warnings.append(f"{obj.name}: floor must not block movement")
+        if blocks_movement:
+            blockers += 1
+            if "game_nav_story_index" not in obj:
+                warnings.append(f"{obj.name}: movement blocker missing game_nav_story_index")
+        if nav_kind in {"stair_connector", "stair_checkpoint"} and blocks_movement:
+            warnings.append(f"{obj.name}: {nav_kind} must not block movement")
+        if part == "decal" and blocks_movement:
+            warnings.append(f"{obj.name}: decal must not block movement")
+        if part == "floor" and blocks_movement:
+            warnings.append(f"{obj.name}: floor must not block movement")
+        if part in {"outer_wall", "inner_wall"}:
+            if game_nav_kind != "wall":
+                warnings.append(f"{obj.name}: {part} must export game_nav_kind=wall")
+            if not blocks_movement or not blocks_vision:
+                warnings.append(f"{obj.name}: {part} must block movement and vision")
+        if part == "stair":
+            if game_nav_kind != "stairs":
+                warnings.append(f"{obj.name}: stair mesh must export game_nav_kind=stairs")
+            if blocks_movement or blocks_vision:
+                warnings.append(f"{obj.name}: stair mesh must not block movement or vision")
+            if footprint != "none":
+                warnings.append(f"{obj.name}: stair mesh must use game_nav_footprint=none")
+
+    ok = not warnings
+    return GameNavigationValidationResult(
+        ok=ok,
+        warnings=tuple(warnings),
+        object_count=nav_objects,
+        blocker_count=blockers,
+        floor_count=floors,
+    )
+
+
 def _create_stair_navigation_objects(
     nav_collection: bpy.types.Collection,
     building_root: bpy.types.Object,
@@ -276,6 +348,7 @@ def _create_stair_navigation_objects(
     connector["game_hidden_at_runtime"] = True
     connector["hide_in_game"] = True
     connector["nav_switchback"] = len(path) >= 5
+    _apply_stair_nav_object_metadata(connector, from_story)
     _write_connector_path_metadata(connector, path)
     if outside:
         connector["outside"] = True
@@ -319,6 +392,7 @@ def _create_checkpoint_objects_for_connector(
         checkpoint["generated_by"] = ADDON_ID
         checkpoint["game_hidden_at_runtime"] = True
         checkpoint["hide_in_game"] = True
+        _apply_stair_nav_object_metadata(checkpoint, point.story_index)
         checkpoint["nav_centerline_x"] = float(point.location[0])
         checkpoint["nav_centerline_y"] = float(point.location[1])
         checkpoint["nav_centerline_z"] = float(point.location[2])
@@ -329,12 +403,25 @@ def _create_checkpoint_objects_for_connector(
     return objects
 
 
+def _apply_stair_nav_object_metadata(obj: bpy.types.Object, story_index: int) -> None:
+    obj["game_nav"] = True
+    obj["game_nav_kind"] = "stairs"
+    obj["game_nav_story_index"] = int(story_index)
+    obj["game_nav_footprint"] = "none"
+    obj["game_nav_blocks_movement"] = False
+    obj["game_nav_blocks_vision"] = False
+    obj["game_nav_cover"] = "none"
+    obj["game_nav_movement_cost"] = 1.0
+    obj["game_nav_source_part"] = str(obj.get("nav_kind", "stair"))
+
+
 def _rebuild_connector_children(connector: bpy.types.Object, path: list[StairNavPoint], *, outside: bool) -> list[bpy.types.Object]:
     for child in list(connector.children):
         if str(child.get("nav_kind", "")).startswith("stair_") or str(child.get("nav_debug_kind", "")):
             bpy.data.objects.remove(child, do_unlink=True)
     connector["nav_switchback"] = len(path) >= 5
     connector["checkpoint_count"] = len(path)
+    _apply_stair_nav_object_metadata(connector, int(connector.get("from_story", 0)))
     _write_connector_path_metadata(connector, path)
     material = _ensure_checkpoint_material()
     objects = _create_checkpoint_objects_for_connector(connector, path, material, outside=outside)

@@ -152,6 +152,7 @@ def apply_story_object_context(obj: bpy.types.Object, context) -> None:
     obj["story_index"] = int(story_plan.story_index)
     obj["story_z_offset"] = float(story_plan.z_offset)
     apply_game_visibility_metadata(obj, context)
+    apply_game_navigation_metadata(obj, context)
 
 
 def apply_game_visibility_metadata(obj: bpy.types.Object, context) -> None:
@@ -194,6 +195,72 @@ def apply_game_visibility_metadata(obj: bpy.types.Object, context) -> None:
         obj["game_surface_type"] = str(surface_type)
     if part == "floor":
         obj["game_inside_volume_source"] = True
+
+
+def apply_game_navigation_metadata(obj: bpy.types.Object, context) -> None:
+    """Adds the stable exported game navigation metadata contract."""
+    part = str(obj.get("building_part", obj.get("part", ""))).lower()
+    if not part:
+        return
+
+    story_plan = getattr(context, "story_plan", None)
+    story_index = int(getattr(story_plan, "story_index", obj.get("story_index", 0)))
+    nav = _game_navigation_classification(obj, part)
+
+    obj["game_nav"] = True
+    obj["game_nav_kind"] = nav["kind"]
+    obj["game_nav_story_index"] = story_index
+    obj["game_nav_footprint"] = nav["footprint"]
+    obj["game_nav_blocks_movement"] = bool(nav["blocks_movement"])
+    obj["game_nav_blocks_vision"] = bool(nav["blocks_vision"])
+    obj["game_nav_cover"] = nav["cover"]
+    obj["game_nav_movement_cost"] = float(nav["movement_cost"])
+    obj["game_nav_source_part"] = str(obj.get("building_part", ""))
+
+    if "tile_x" in obj:
+        obj["game_nav_tile_x"] = int(obj.get("tile_x"))
+    if "tile_y" in obj:
+        obj["game_nav_tile_y"] = int(obj.get("tile_y"))
+    room_id = obj.get("room_id", obj.get("stair_room_id", None))
+    if room_id is not None:
+        obj["game_nav_room_id"] = int(room_id)
+
+
+def _game_navigation_classification(obj: bpy.types.Object, part: str) -> dict[str, object]:
+    surface_type = str(obj.get("surface_type", "")).lower()
+    if part == "floor" or part == "terrace" or surface_type == "terrace":
+        return _nav_class("floor", "bounds", False, False, "none")
+    if part == "roof":
+        return _nav_class("ignore", "none", False, False, "none")
+    if part in {"outer_wall", "inner_wall"}:
+        return _nav_class("wall", "bounds", True, True, "high")
+    if part == "door":
+        return _nav_class("door", "bounds", False, False, "none")
+    if part == "stair":
+        return _nav_class("stairs", "none", False, False, "none")
+    if part in {"roof_railing", "terrace_railing", "border"}:
+        return _nav_class("obstacle", "bounds", True, False, "low")
+    if part in {"window", "decal", "room_metadata", "visibility_volume"}:
+        return _nav_class("ignore", "none", False, False, "none")
+    return _nav_class("decorative", "none", False, False, "none")
+
+
+def _nav_class(
+    kind: str,
+    footprint: str,
+    blocks_movement: bool,
+    blocks_vision: bool,
+    cover: str,
+    movement_cost: float = 1.0,
+) -> dict[str, object]:
+    return {
+        "kind": kind,
+        "footprint": footprint,
+        "blocks_movement": blocks_movement,
+        "blocks_vision": blocks_vision,
+        "cover": cover,
+        "movement_cost": movement_cost,
+    }
 
 
 def _game_visibility_role(part: str) -> str:

@@ -33,6 +33,11 @@ class FLOORPLAN_V2_PT_panel(bpy.types.Panel):
         optimize_box.operator("floorplan_ru_v2.optimize_generated_meshes", icon="MOD_DECIM")
         optimize_box.label(text="После ручных правок перед экспортом", icon="INFO")
 
+        game_grid_box = layout.box()
+        game_grid_box.label(text="Игровая сетка")
+        game_grid_box.operator("floorplan_ru_v2.align_building_to_game_grid", icon="SNAP_GRID")
+        game_grid_box.label(text="bbox min X/Z на tile grid игры", icon="INFO")
+
         # Базовые числовые и служебные настройки генерации.
         box = layout.box()
         box.label(text="Общее")

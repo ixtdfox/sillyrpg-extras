@@ -361,6 +361,14 @@ class GeneratedMeshOptimizer:
             self._prop(obj, "game_occluder", ""),
             self._prop(obj, "game_hide_when_above_player", ""),
             self._prop(obj, "game_part", self._prop(obj, "building_part", "")),
+            self._prop(obj, "game_nav", ""),
+            self._prop(obj, "game_nav_story_index", ""),
+            self._prop(obj, "game_nav_kind", ""),
+            self._prop(obj, "game_nav_blocks_movement", ""),
+            self._prop(obj, "game_nav_blocks_vision", ""),
+            self._prop(obj, "game_nav_cover", ""),
+            self._prop(obj, "game_nav_footprint", ""),
+            self._prop(obj, "game_nav_movement_cost", ""),
         )
 
     def _stair_group_key(self, obj: bpy.types.Object, story) -> tuple:
@@ -392,6 +400,7 @@ class GeneratedMeshOptimizer:
         )
 
     def _copy_group_properties(self, group_key: tuple, sources: list[bpy.types.Object], target: bpy.types.Object) -> None:
+        self._warn_if_group_nav_conflicts(group_key, sources)
         part = str(group_key[0])
         target["generated_by"] = ADDON_ID
         target["optimized_mesh"] = True
@@ -435,10 +444,41 @@ class GeneratedMeshOptimizer:
             "game_wall_height",
             "game_story_z_offset",
             "game_surface_type",
+            "game_nav",
+            "game_nav_kind",
+            "game_nav_story_index",
+            "game_nav_footprint",
+            "game_nav_blocks_movement",
+            "game_nav_blocks_vision",
+            "game_nav_cover",
+            "game_nav_movement_cost",
+            "game_nav_source_part",
+            "game_nav_tile_x",
+            "game_nav_tile_y",
+            "game_nav_room_id",
         ):
             value = self._shared_prop(sources, prop_name)
             if value is not None:
                 target[prop_name] = value
+
+    def _warn_if_group_nav_conflicts(self, group_key: tuple, sources: list[bpy.types.Object]) -> None:
+        for prop_name in (
+            "game_nav",
+            "game_nav_kind",
+            "game_nav_story_index",
+            "game_nav_footprint",
+            "game_nav_blocks_movement",
+            "game_nav_blocks_vision",
+            "game_nav_cover",
+            "game_nav_movement_cost",
+        ):
+            values = {self._prop(obj, prop_name, None) for obj in sources}
+            if len(values) > 1:
+                print(
+                    "[MeshOptimizerWarning]",
+                    f"group={self._group_name(group_key)}",
+                    f"conflicting {prop_name}={sorted(str(value) for value in values)}",
+                )
 
     def _group_name(self, group_key: tuple) -> str:
         group_key = self._base_group_key(group_key)
