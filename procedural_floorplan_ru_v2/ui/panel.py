@@ -35,8 +35,18 @@ class FLOORPLAN_V2_PT_panel(bpy.types.Panel):
 
         game_grid_box = layout.box()
         game_grid_box.label(text="Игровая сетка")
+        game_grid_box.prop(props, "game_rect_grid_preview_enabled")
+        preview_col = game_grid_box.column(align=True)
+        preview_col.enabled = props.game_rect_grid_preview_enabled
+        preview_col.prop(props, "game_rect_grid_preview_radius_tiles")
+        preview_col.prop(props, "game_rect_grid_preview_y_offset")
+        preview_row = game_grid_box.row(align=True)
+        preview_row.operator("floorplan_ru_v2.refresh_game_rect_grid_preview", icon="FILE_REFRESH")
+        preview_row.operator("floorplan_ru_v2.remove_game_rect_grid_preview", icon="TRASH")
         game_grid_box.operator("floorplan_ru_v2.align_building_to_game_grid", icon="SNAP_GRID")
-        game_grid_box.label(text="bbox min X/Z на tile grid игры", icon="INFO")
+        game_grid_box.operator("floorplan_ru_v2.align_building_anchor_to_rect_center", icon="EMPTY_ARROWS")
+        game_grid_box.label(text="1 building tile = 1 rect tile", icon="INFO")
+        game_grid_box.label(text="Blender X/Y preview = game X/Z grid", icon="INFO")
 
         # Базовые числовые и служебные настройки генерации.
         box = layout.box()
@@ -45,6 +55,10 @@ class FLOORPLAN_V2_PT_panel(bpy.types.Panel):
         col.prop(props, "delete_old")
         col.prop(props, "randomize_seed_each_build")
         col.prop(props, "collection_name")
+        col.prop(props, "generation_grid_mode")
+        if props.generation_grid_mode == "RECT_METER_GRID":
+            col.label(text="Rect mode: floor, walls and doors use one RectLayout.", icon="INFO")
+            col.label(text="Wall thickness is visual only.", icon="INFO")
         col.prop(props, "seed")
         col.prop(props, "target_room_count")
         col.prop(props, "min_room_side_m")

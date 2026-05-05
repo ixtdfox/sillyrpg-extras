@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import json
+import math
+
 import bpy
 
 from ..common.utils import FLOOR_TILE_SIZE_M, apply_story_object_context, link_object, tag_generated_object
 from ..domain.walls import WallSegment
 from ..builders.wall_utils import build_box_mesh, segment_geometry
+from ..grid import RectCell, RectEdge
 
 
 class WallMeshFactory:
@@ -40,6 +44,11 @@ class WallMeshFactory:
         obj["wall_width"] = float(segment.length)
         obj["wall_module_width"] = float(module_width)
         obj["wall_thickness"] = float(segment.thickness)
+        obj["blocksNavigation"] = True
+        obj["blocked_edges"] = json.dumps(
+            [edge.to_game_dict("wall") for edge in self._wall_edges(segment)],
+            separators=(",", ":"),
+        )
         if segment.room_a_id is not None:
             obj["room_a_id"] = int(segment.room_a_id)
         if segment.room_b_id is not None:
@@ -50,3 +59,17 @@ class WallMeshFactory:
         apply_story_object_context(obj, context)
         link_object(context.collection, obj)
         return obj
+
+    def _wall_edges(self, segment: WallSegment) -> list[RectEdge]:
+        edges: list[RectEdge] = []
+        start = math.floor(float(segment.start))
+        end = math.ceil(float(segment.end))
+        if segment.orientation == "x":
+            y_line = round(float(segment.line))
+            for x in range(start, end):
+                edges.append(RectEdge(RectCell(x, y_line - 1), RectCell(x, y_line)))
+        else:
+            x_line = round(float(segment.line))
+            for y in range(start, end):
+                edges.append(RectEdge(RectCell(x_line - 1, y), RectCell(x_line, y)))
+        return edges

@@ -89,6 +89,8 @@ class GeneratedMeshOptimizer:
 
         candidates: list[bpy.types.Object] = []
         for obj in objects:
+            if bool(obj.get("game_rect_grid_preview", False)) or bool(obj.get("export_exclude", False)) or bool(obj.get("do_not_export", False)):
+                continue
             if obj.type != "MESH":
                 continue
             if obj.get("generated_by") != ADDON_ID:

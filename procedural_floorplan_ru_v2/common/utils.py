@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Iterable
 
 import bpy
+import json
 
 
 ADDON_ID = "procedural_floorplan_ru_v2"
@@ -392,10 +393,17 @@ def tag_generated_object(
     obj["generated_by"] = ADDON_ID
     obj["building_part"] = building_part
     obj["tile_size"] = float(tile_size)
+    obj["generation_grid_mode"] = "RECT_METER_GRID"
+    obj["generation_pipeline"] = "rect_meter_grid"
+    obj["grid_contract"] = "sillyrpg.grid_navigation.v3"
+    obj["grid_type"] = "rect"
+    obj["tile_size_m"] = float(tile_size)
     if tile_x is not None:
         obj["tile_x"] = int(tile_x)
     if tile_y is not None:
         obj["tile_y"] = int(tile_y)
+    if tile_x is not None and tile_y is not None:
+        obj["grid_cells"] = json.dumps([{"x": int(tile_x), "z": int(tile_y)}], separators=(",", ":"))
 
 
 def selected_objects_in_collection(collection: bpy.types.Collection) -> Iterable[bpy.types.Object]:

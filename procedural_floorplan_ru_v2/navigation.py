@@ -9,6 +9,7 @@ import bpy
 
 from .common.utils import ADDON_ID, ensure_child_collection, link_object
 from .domain.stairs import ExternalStairPlacement, StairPlacement
+from .game_grid import GAME_TILE_SIZE_M
 
 
 NAV_COLLECTION_NAME = "Nav"
@@ -58,6 +59,7 @@ class GameNavigationValidationResult:
 def ensure_building_root(collection: bpy.types.Collection) -> bpy.types.Object:
     for obj in collection.objects:
         if bool(obj.get("building_root", False)) and obj.get("generated_by") == ADDON_ID:
+            _tag_building_grid_anchor(obj)
             return obj
 
     obj = bpy.data.objects.new(BUILDING_ROOT_NAME, None)
@@ -66,8 +68,25 @@ def ensure_building_root(collection: bpy.types.Collection) -> bpy.types.Object:
     obj["generated_by"] = ADDON_ID
     obj["building_root"] = True
     obj["building_root_kind"] = "floorplan_building_root"
+    _tag_building_grid_anchor(obj)
     link_object(collection, obj)
     return obj
+
+
+def _tag_building_grid_anchor(obj: bpy.types.Object) -> None:
+    if "generation_grid_mode" not in obj:
+        obj["generation_grid_mode"] = "SQUARE_LEGACY"
+    if "generation_pipeline" not in obj:
+        obj["generation_pipeline"] = "square_legacy"
+    obj["building_grid_anchor"] = True
+    obj["game_grid_origin_contract"] = "world_origin"
+    obj["game_grid_plane_contract"] = "blender_xy_maps_to_game_xz"
+    obj["grid_contract"] = "sillyrpg.grid_navigation.v3"
+    obj["grid_type"] = "rect"
+    obj["game_grid_contract"] = "rect_meter_grid"
+    obj["building_tile_size_m"] = float(GAME_TILE_SIZE_M)
+    obj["tile_size_m"] = float(GAME_TILE_SIZE_M)
+    obj["origin_policy"] = "world_origin_integer_meter_grid"
 
 
 def parent_objects_to_building_root(collection: bpy.types.Collection, objects: Iterable[bpy.types.Object]) -> bpy.types.Object:

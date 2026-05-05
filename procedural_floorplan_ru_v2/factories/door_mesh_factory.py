@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import json
+import math
+
 import bpy
 
 from .. import atlas
 from ..builders.wall_utils import build_box_mesh
 from ..common.utils import FLOOR_TILE_SIZE_M, apply_story_object_context, link_object, quantize_025, tag_generated_object
 from ..domain.doors import DoorPlacement
+from ..grid import RectCell, RectEdge, create_game_rect_layout
 
 
 class DoorMeshFactory:
@@ -45,6 +49,18 @@ class DoorMeshFactory:
         obj["edge_side"] = placement.host_wall_side
         obj["door_slot_start"] = float(placement.slot_start)
         obj["door_slot_end"] = float(placement.slot_end)
+        door_edge = self._door_edge(placement)
+        edge_center = create_game_rect_layout().edge_center(door_edge)
+        actual_center = (float(obj.location.x), float(obj.location.y))
+        if abs(actual_center[0] - edge_center[0]) > 0.51 or abs(actual_center[1] - edge_center[1]) > 0.51:
+            print(
+                f"[GridValidation] Door {obj.name} is misaligned: "
+                f"expected edge center=({edge_center[0]:.3f}, {edge_center[1]:.3f}) "
+                f"actual=({actual_center[0]:.3f}, {actual_center[1]:.3f}) edge={door_edge.key()}"
+            )
+        obj["opensNavigationEdge"] = True
+        obj["door_edge"] = json.dumps(door_edge.to_game_dict(), separators=(",", ":"))
+        obj["door_center_world"] = json.dumps({"x": edge_center[0], "z": edge_center[1]}, separators=(",", ":"))
         obj["atlas_category"] = "outside_doors" if placement.door_type in {"entry", "external_stair"} else "inside_doors"
         door_tile_id = atlas.resolve_door_tile_id(context, placement.door_type)
         if door_tile_id:
@@ -89,3 +105,12 @@ class DoorMeshFactory:
         if placement.orientation == "x":
             return int(placement.center), int(placement.line)
         return int(placement.line), int(placement.center)
+
+    def _door_edge(self, placement: DoorPlacement) -> RectEdge:
+        if placement.orientation == "x":
+            x = math.floor(float(placement.center))
+            y_line = round(float(placement.line))
+            return RectEdge(RectCell(x, y_line - 1), RectCell(x, y_line))
+        x_line = round(float(placement.line))
+        y = math.floor(float(placement.center))
+        return RectEdge(RectCell(x_line - 1, y), RectCell(x_line, y))

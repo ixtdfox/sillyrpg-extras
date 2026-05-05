@@ -11,6 +11,7 @@ DEFAULTS = {
     "DELETE_OLD": True,
     "RANDOMIZE_SEED_EACH_BUILD": False,
     "COLLECTION_NAME": "GeneratedFloorPlanV2",
+    "GENERATION_GRID_MODE": "RECT_METER_GRID",
     "SEED": 42,
     "TARGET_ROOM_COUNT": 6,
     "MIN_ROOM_SIDE_M": 3.0,
@@ -73,6 +74,9 @@ DEFAULTS = {
     "RAILING_POST_SIZE": 0.06,
     "RAILING_RAIL_THICKNESS": 0.04,
     "RAILING_RAIL_COUNT": 3,
+    "GAME_RECT_GRID_PREVIEW_ENABLED": False,
+    "GAME_RECT_GRID_PREVIEW_RADIUS_TILES": 24,
+    "GAME_RECT_GRID_PREVIEW_Y_OFFSET": 0.03,
 }
 
 SHAPE_ITEMS = [
@@ -83,6 +87,10 @@ SHAPE_ITEMS = [
     ("t_shape", "T", "T-образная форма"),
     ("courdoner", "Курдонер", "Форма с парадным внутренним двором"),
     ("offset", "Смещенный", "Составная форма со смещённым объёмом"),
+]
+
+GENERATION_GRID_MODE_ITEMS = [
+    ("RECT_METER_GRID", "Rect meter grid", "One building tile is one 1m rect navigation cell"),
 ]
 
 STORY_LAYOUT_ITEMS = [
@@ -399,6 +407,20 @@ def _on_min_room_side_changed(self, _context):
     self.min_room_side_m = snapped_value
 
 
+def _on_game_rect_grid_preview_enabled_changed(self, context):
+    """Lightweight viewport toggle for the diagnostic game rect grid."""
+    try:
+        from ..preview import GameRectGridPreviewService
+
+        service = GameRectGridPreviewService()
+        if bool(self.game_rect_grid_preview_enabled):
+            service.refresh_preview(context.scene, self)
+        else:
+            service.remove_preview(context.scene)
+    except Exception as exc:
+        print(f"[procedural_floorplan_ru_v2] game rect preview toggle failed: {exc}")
+
+
 def apply_defaults_to_props(props) -> None:
     """Заполняет все свойства аддона исходными значениями.
 
@@ -411,6 +433,7 @@ def apply_defaults_to_props(props) -> None:
     props.delete_old = DEFAULTS["DELETE_OLD"]
     props.randomize_seed_each_build = DEFAULTS["RANDOMIZE_SEED_EACH_BUILD"]
     props.collection_name = DEFAULTS["COLLECTION_NAME"]
+    props.generation_grid_mode = DEFAULTS["GENERATION_GRID_MODE"]
     props.seed = DEFAULTS["SEED"]
     props.target_room_count = DEFAULTS["TARGET_ROOM_COUNT"]
     props.min_room_side_m = DEFAULTS["MIN_ROOM_SIDE_M"]
@@ -473,6 +496,9 @@ def apply_defaults_to_props(props) -> None:
     props.railing_post_size = DEFAULTS["RAILING_POST_SIZE"]
     props.railing_rail_thickness = DEFAULTS["RAILING_RAIL_THICKNESS"]
     props.railing_rail_count = DEFAULTS["RAILING_RAIL_COUNT"]
+    props.game_rect_grid_preview_enabled = DEFAULTS["GAME_RECT_GRID_PREVIEW_ENABLED"]
+    props.game_rect_grid_preview_radius_tiles = DEFAULTS["GAME_RECT_GRID_PREVIEW_RADIUS_TILES"]
+    props.game_rect_grid_preview_y_offset = DEFAULTS["GAME_RECT_GRID_PREVIEW_Y_OFFSET"]
     props.atlas_manifest_json = ""
     props.atlas_sync_lock = False
     props.wall_sync_lock = False
@@ -510,6 +536,35 @@ class FloorplanV2Settings(bpy.types.PropertyGroup):
         default=DEFAULTS["RANDOMIZE_SEED_EACH_BUILD"],
     )
     collection_name: StringProperty(name="Имя коллекции", description="Коллекция Blender для нового генератора", default=DEFAULTS["COLLECTION_NAME"])
+    generation_grid_mode: EnumProperty(
+        name="Generation Grid Mode",
+        description="Legacy square generation or real rect-first generation aligned to the game grid",
+        items=GENERATION_GRID_MODE_ITEMS,
+        default=DEFAULTS["GENERATION_GRID_MODE"],
+    )
+    game_rect_grid_preview_enabled: BoolProperty(
+        name="Показать сетку игры",
+        description="Показывает debug-сетку: 1 building tile = 1 game rect tile",
+        default=DEFAULTS["GAME_RECT_GRID_PREVIEW_ENABLED"],
+        update=_on_game_rect_grid_preview_enabled_changed,
+    )
+    game_rect_grid_preview_radius_tiles: IntProperty(
+        name="Радиус preview, tiles",
+        description="Сколько клеток рисовать вокруг world origin",
+        default=DEFAULTS["GAME_RECT_GRID_PREVIEW_RADIUS_TILES"],
+        min=4,
+        max=200,
+        update=_on_game_rect_grid_preview_enabled_changed,
+    )
+    game_rect_grid_preview_y_offset: FloatProperty(
+        name="Z offset preview",
+        description="Высота debug-сетки над полом в Blender; game Y offset после импорта",
+        default=DEFAULTS["GAME_RECT_GRID_PREVIEW_Y_OFFSET"],
+        min=-10.0,
+        max=10.0,
+        precision=3,
+        update=_on_game_rect_grid_preview_enabled_changed,
+    )
     seed: IntProperty(name="Seed", description="Зерно генерации формы", default=DEFAULTS["SEED"], min=0)
     target_room_count: IntProperty(name="Количество комнат", description="Влияет на размер и сложность footprint", default=DEFAULTS["TARGET_ROOM_COUNT"], min=1, soft_max=30)
     min_room_side_m: FloatProperty(

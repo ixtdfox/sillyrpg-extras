@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import bpy
 
 from ..common.tile_surface_mesh import build_tile_surface_mesh
@@ -29,6 +31,10 @@ class FloorMeshFactory:
         obj = bpy.data.objects.new("Floor", mesh)
         tag_generated_object(obj, "floor", tile_size=FLOOR_TILE_SIZE_M)
         obj["atlas_category"] = "floors"
+        obj["grid_cells"] = json.dumps(
+            [{"x": int(tile_x), "z": int(tile_y)} for tile_x, tile_y in sorted(floor_tiles)],
+            separators=(",", ":"),
+        )
         if floor_tile_id:
             obj["atlas_tile_id"] = floor_tile_id
         obj["footprint_shape"] = context.footprint.shape_key
