@@ -12,6 +12,10 @@ from ..common.utils import ADDON_ID, link_object
 from ..game_grid import GAME_GRID_ORIGIN_X_M, GAME_GRID_ORIGIN_Z_M, WORLD_TILE_SIZE_M
 from ..grid import GRID_NAVIGATION_CONTRACT, GameGridCoordinateMapper, RectCell, RectEdge, create_game_rect_layout
 
+DEFAULT_EXTERNAL_STAIR_COMBAT_COST = 2
+DEFAULT_INTERNAL_STAIR_COMBAT_COST = 2
+MAX_REASONABLE_ONE_STORY_STAIR_COMBAT_COST = 6
+
 
 @dataclass
 class _StoryNavigationData:
@@ -620,12 +624,53 @@ class NavigationMetadataExporter:
                     to_story_index=to_story,
                     to_cell=endpoints[1],
                     kind=kind,
-                    cost=max(1, int(connector.get("cost", max(2, len(traversal_path) - 1)))),
+                    cost=self._resolve_stair_tactical_cost(connector, kind, from_story, to_story),
                     bidirectional=_as_bool(connector.get("bidirectional"), default=True),
                     traversal_path=tuple(traversal_path),
                 )
             )
         return stairs
+
+    def _resolve_stair_tactical_cost(
+        self,
+        connector: bpy.types.Object,
+        kind: str,
+        from_story: int,
+        to_story: int,
+    ) -> int:
+        story_delta = max(1, abs(int(to_story) - int(from_story)))
+        adjacent_story_cost = (
+            DEFAULT_EXTERNAL_STAIR_COMBAT_COST
+            if kind == "external"
+            else DEFAULT_INTERNAL_STAIR_COMBAT_COST
+        )
+        default_cost = adjacent_story_cost * story_delta
+
+        explicit_cost = connector.get("combat_cost", connector.get("movement_cost"))
+        if explicit_cost is not None:
+            try:
+                cost = int(explicit_cost)
+            except (TypeError, ValueError):
+                cost = 0
+            if cost > 0:
+                return cost
+
+        legacy_cost = connector.get("cost")
+        if legacy_cost is not None:
+            try:
+                cost = int(legacy_cost)
+            except (TypeError, ValueError):
+                cost = 0
+            max_reasonable_cost = MAX_REASONABLE_ONE_STORY_STAIR_COMBAT_COST * story_delta
+            if 0 < cost <= max_reasonable_cost:
+                return cost
+            if cost > max_reasonable_cost:
+                print(
+                    f"[GridValidation] stair '{connector.name}' legacy cost={cost} exceeds tactical limit "
+                    f"{max_reasonable_cost}; exporting default combat cost {default_cost}"
+                )
+
+        return default_cost
 
     def _resolve_stair_endpoints(
         self,
@@ -760,6 +805,8 @@ class NavigationMetadataExporter:
             "kind": stair.kind,
             "bidirectional": stair.bidirectional,
             "cost": stair.cost,
+            "movement_cost": stair.cost,
+            "combat_cost": stair.cost,
             "from": {
                 "story_index": int(stair.from_story_index),
                 "cell": {"x": from_cell.x, "z": from_cell.y},
