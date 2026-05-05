@@ -30,12 +30,26 @@ class _StoryNavigationData:
 
 
 @dataclass(frozen=True)
+class _StairPathPoint:
+    x: float
+    y: float
+    z: float
+    story_index: int | None = None
+    role: str | None = None
+    vertical_phase: str | None = None
+
+
+@dataclass(frozen=True)
 class _StairLink:
     stair_id: str
     from_story_index: int
     from_cell: RectCell
     to_story_index: int
     to_cell: RectCell
+    kind: str
+    cost: int
+    bidirectional: bool
+    traversal_path: tuple[_StairPathPoint, ...]
 
 
 @dataclass(frozen=True)
@@ -589,10 +603,15 @@ class NavigationMetadataExporter:
         for stair_id, connector in sorted(connectors.items(), key=lambda item: item[0]):
             from_story = int(connector.get("from_story", 0))
             to_story = int(connector.get("to_story", from_story + 1))
-            endpoints = self._resolve_stair_endpoints(connector, checkpoints_by_stair.get(stair_id, []), from_story, to_story)
+            checkpoints = checkpoints_by_stair.get(stair_id, [])
+            traversal_path = self._resolve_stair_path(connector, checkpoints, from_story, to_story)
+            endpoints = self._resolve_stair_endpoints(connector, checkpoints, from_story, to_story, traversal_path)
             if endpoints is None:
                 print(f"[GridValidation] stair '{stair_id}' has no checkpoint/path endpoints for contract export")
                 continue
+            kind = str(connector.get("stair_kind", "internal") or "internal").lower()
+            if kind not in {"internal", "external"}:
+                kind = "internal"
             stairs.append(
                 _StairLink(
                     stair_id=stair_id,
@@ -600,6 +619,10 @@ class NavigationMetadataExporter:
                     from_cell=endpoints[0],
                     to_story_index=to_story,
                     to_cell=endpoints[1],
+                    kind=kind,
+                    cost=max(1, int(connector.get("cost", max(2, len(traversal_path) - 1)))),
+                    bidirectional=_as_bool(connector.get("bidirectional"), default=True),
+                    traversal_path=tuple(traversal_path),
                 )
             )
         return stairs
@@ -610,6 +633,7 @@ class NavigationMetadataExporter:
         checkpoints: list[bpy.types.Object],
         from_story: int,
         to_story: int,
+        path_points: list[_StairPathPoint] | None = None,
     ) -> tuple[RectCell, RectCell] | None:
         if checkpoints:
             ordered = sorted(checkpoints, key=lambda cp: int(cp.get("checkpoint_index", 0)))
@@ -618,10 +642,13 @@ class NavigationMetadataExporter:
             if from_checkpoint is not None and to_checkpoint is not None:
                 return self._object_to_rect_cell(from_checkpoint), self._object_to_rect_cell(to_checkpoint)
 
-        path_points = self._read_path_points(connector)
+        path_points = path_points if path_points is not None else self._read_path_points(connector, from_story)
         if len(path_points) < 2:
             return None
-        return self._world_point_to_rect_cell(path_points[0]), self._world_point_to_rect_cell(path_points[-1])
+        return (
+            self._world_point_to_rect_cell((path_points[0].x, path_points[0].y, path_points[0].z)),
+            self._world_point_to_rect_cell((path_points[-1].x, path_points[-1].y, path_points[-1].z)),
+        )
 
     def _pick_story_checkpoint(self, checkpoints: list[bpy.types.Object], story_index: int, *, first: bool) -> bpy.types.Object | None:
         candidates = [cp for cp in checkpoints if int(cp.get("story_index", -10_000)) == story_index]
@@ -629,7 +656,26 @@ class NavigationMetadataExporter:
             return checkpoints[0] if first else checkpoints[-1]
         return candidates[0] if first else candidates[-1]
 
-    def _read_path_points(self, connector: bpy.types.Object) -> list[tuple[float, float, float]]:
+    def _resolve_stair_path(
+        self,
+        connector: bpy.types.Object,
+        checkpoints: list[bpy.types.Object],
+        from_story: int,
+        to_story: int,
+    ) -> list[_StairPathPoint]:
+        path_points = self._read_path_points(connector, from_story)
+        if path_points:
+            return path_points
+        ordered = sorted(checkpoints, key=lambda cp: int(cp.get("checkpoint_index", 0)))
+        return [self._checkpoint_to_path_point(checkpoint, from_story, to_story) for checkpoint in ordered]
+
+    def _read_path_points(self, connector: bpy.types.Object, from_story: int) -> list[_StairPathPoint]:
+        detailed_json = str(connector.get("traversal_path_local_detailed_json", "") or connector.get("traversal_path_points_local_json", ""))
+        if detailed_json:
+            detailed_points = self._read_detailed_path_points(detailed_json)
+            if detailed_points:
+                return detailed_points
+
         path_json = str(connector.get("traversal_path_local_json", "") or connector.get("nav_expected_path_local_json", ""))
         if not path_json:
             return []
@@ -637,11 +683,66 @@ class NavigationMetadataExporter:
             values = json.loads(path_json)
         except Exception:
             return []
-        points: list[tuple[float, float, float]] = []
+        roles = self._read_json_list(connector.get("nav_roles_json"))
+        story_indices = self._read_json_list(connector.get("nav_story_indices_json"))
+        vertical_phases = self._read_json_list(connector.get("nav_vertical_phases_json"))
+        points: list[_StairPathPoint] = []
         for value in values if isinstance(values, list) else []:
+            index = len(points)
             if isinstance(value, list) and len(value) == 3:
-                points.append((float(value[0]), float(value[1]), float(value[2])))
+                story_index = int(story_indices[index]) if index < len(story_indices) and isinstance(story_indices[index], int) else from_story
+                role = str(roles[index]) if index < len(roles) and roles[index] is not None else None
+                vertical_phase = str(vertical_phases[index]) if index < len(vertical_phases) and vertical_phases[index] is not None else None
+                points.append(_StairPathPoint(float(value[0]), float(value[1]), float(value[2]), story_index, role, vertical_phase))
         return points
+
+    def _read_detailed_path_points(self, raw_json: str) -> list[_StairPathPoint]:
+        try:
+            values = json.loads(raw_json)
+        except Exception:
+            return []
+        points: list[_StairPathPoint] = []
+        for value in values if isinstance(values, list) else []:
+            if not isinstance(value, dict):
+                continue
+            position = value.get("position")
+            if not isinstance(position, list) or len(position) != 3:
+                continue
+            story_index = value.get("storyIndex", value.get("story_index"))
+            vertical_phase = value.get("verticalPhase", value.get("vertical_phase"))
+            points.append(
+                _StairPathPoint(
+                    float(position[0]),
+                    float(position[1]),
+                    float(position[2]),
+                    int(story_index) if isinstance(story_index, int) else None,
+                    str(value.get("role")) if value.get("role") is not None else None,
+                    str(vertical_phase) if vertical_phase is not None else None,
+                )
+            )
+        return points
+
+    def _read_json_list(self, raw: object) -> list[object]:
+        if not raw:
+            return []
+        try:
+            value = json.loads(str(raw))
+        except Exception:
+            return []
+        return value if isinstance(value, list) else []
+
+    def _checkpoint_to_path_point(self, checkpoint: bpy.types.Object, from_story: int, to_story: int) -> _StairPathPoint:
+        story_index = int(checkpoint.get("story_index", from_story))
+        role = str(checkpoint.get("checkpoint_role", checkpoint.get("nav_role", "")) or "")
+        vertical_phase = str(checkpoint.get("vertical_phase", "") or "")
+        return _StairPathPoint(
+            float(checkpoint.location.x),
+            float(checkpoint.location.y),
+            float(checkpoint.location.z),
+            story_index if story_index in {from_story, to_story} else story_index,
+            role or None,
+            vertical_phase or None,
+        )
 
     def _object_to_rect_cell(self, obj: bpy.types.Object) -> RectCell:
         return self._world_point_to_rect_cell((float(obj.location.x), float(obj.location.y), float(obj.location.z)))
@@ -652,8 +753,13 @@ class NavigationMetadataExporter:
     def _map_stair_link(self, stair: _StairLink) -> dict[str, object]:
         from_cell = self._mapper.cell_to_game(stair.from_cell)
         to_cell = self._mapper.cell_to_game(stair.to_cell)
+        traversal_path_world = [self._map_stair_path_point(point) for point in stair.traversal_path]
+        self._validate_mapped_stair_link(stair, from_cell, to_cell, traversal_path_world)
         return {
             "id": stair.stair_id,
+            "kind": stair.kind,
+            "bidirectional": stair.bidirectional,
+            "cost": stair.cost,
             "from": {
                 "story_index": int(stair.from_story_index),
                 "cell": {"x": from_cell.x, "z": from_cell.y},
@@ -662,7 +768,77 @@ class NavigationMetadataExporter:
                 "story_index": int(stair.to_story_index),
                 "cell": {"x": to_cell.x, "z": to_cell.y},
             },
+            "traversal_path_world": traversal_path_world,
         }
+
+    def _map_stair_path_point(self, point: _StairPathPoint) -> dict[str, object]:
+        x, y, z = self._mapper.world_point_to_game((point.x, point.y, point.z))
+        payload: dict[str, object] = {"x": round(x, 4), "y": round(y, 4), "z": round(z, 4)}
+        if point.story_index is not None:
+            payload["story_index"] = int(point.story_index)
+        if point.role:
+            payload["role"] = point.role
+        if point.vertical_phase:
+            payload["vertical_phase"] = point.vertical_phase
+        return payload
+
+    def _validate_mapped_stair_link(
+        self,
+        stair: _StairLink,
+        from_cell: RectCell,
+        to_cell: RectCell,
+        path: list[dict[str, object]],
+    ) -> None:
+        monotonic_story_ok = self._is_monotonic_story_path(path, stair.from_story_index, stair.to_story_index)
+        print(
+            f"[GridValidation] stair={stair.stair_id} "
+            f"from={stair.from_story_index}:{from_cell.x}:{from_cell.y} "
+            f"to={stair.to_story_index}:{to_cell.x}:{to_cell.y} "
+            f"path_points={len(path)} path_bounds={self._format_point_bounds(path)} "
+            f"monotonic_story_ok={str(monotonic_story_ok).lower()}"
+        )
+        if len(path) < 2:
+            print(f"[GridValidation] stair={stair.stair_id} invalid path_points={len(path)} expected>=2")
+            return
+        first_distance = self._distance_to_cell_center(path[0], from_cell)
+        last_distance = self._distance_to_cell_center(path[-1], to_cell)
+        if first_distance > 2.0 or last_distance > 2.0:
+            print(
+                f"[GridValidation] stair={stair.stair_id} endpoint path distance high: "
+                f"first_to_from_cell={first_distance:.2f}m last_to_to_cell={last_distance:.2f}m"
+            )
+        if stair.kind == "external" and len(path) <= 3:
+            print(
+                f"[GridValidation] stair={stair.stair_id} external stair has only {len(path)} path points; "
+                "switchback stairs should export detailed traversal_path_world"
+            )
+
+    def _distance_to_cell_center(self, point: dict[str, object], cell: RectCell) -> float:
+        point_x = float(point["x"])
+        point_z = float(point["z"])
+        center_x = float(cell.x) + 0.5
+        center_z = float(cell.y) + 0.5
+        return math.hypot(point_x - center_x, point_z - center_z)
+
+    def _format_point_bounds(self, path: list[dict[str, object]]) -> str:
+        if not path:
+            return "n/a"
+        xs = [float(point["x"]) for point in path]
+        ys = [float(point["y"]) for point in path]
+        zs = [float(point["z"]) for point in path]
+        return (
+            f"x=[{min(xs):.2f},{max(xs):.2f}] "
+            f"y=[{min(ys):.2f},{max(ys):.2f}] "
+            f"z=[{min(zs):.2f},{max(zs):.2f}]"
+        )
+
+    def _is_monotonic_story_path(self, path: list[dict[str, object]], from_story: int, to_story: int) -> bool:
+        story_indices = [point.get("story_index") for point in path if isinstance(point.get("story_index"), int)]
+        if len(story_indices) < 2:
+            return True
+        if to_story >= from_story:
+            return all(int(story_indices[index]) <= int(story_indices[index + 1]) for index in range(len(story_indices) - 1))
+        return all(int(story_indices[index]) >= int(story_indices[index + 1]) for index in range(len(story_indices) - 1))
 
     def _format_cell_bounds(self, cells: list[RectCell]) -> str:
         if not cells:
@@ -741,3 +917,17 @@ def _as_optional_int(value: object) -> int | None:
         return int(value)
     except Exception:
         return None
+
+
+def _as_bool(value: object, *, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    return default

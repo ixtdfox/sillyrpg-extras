@@ -27,6 +27,10 @@ class GameGridCoordinateMapper:
     def cell_to_game(self, cell: RectCell) -> RectCell:
         return RectCell(int(cell.x), -int(cell.y) - 1)
 
+    def world_point_to_game(self, point: tuple[float, float, float]) -> tuple[float, float, float]:
+        """Map Blender continuous XYZ to Babylon/game XYZ."""
+        return (float(point[0]), float(point[2]), -float(point[1]))
+
     def edge_to_game(self, edge: RectEdge) -> RectEdge:
         return RectEdge(self.cell_to_game(edge.a), self.cell_to_game(edge.b)).canonical()
 
