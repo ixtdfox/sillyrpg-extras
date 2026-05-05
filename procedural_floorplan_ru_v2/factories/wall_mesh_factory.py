@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 
 import bpy
 
@@ -64,12 +65,40 @@ class WallMeshFactory:
         edges: list[RectEdge] = []
         start = math.floor(float(segment.start))
         end = math.ceil(float(segment.end))
+        line_value = float(segment.line)
+        logical_line = self._resolve_logical_grid_line(line_value)
         if segment.orientation == "x":
-            y_line = round(float(segment.line))
+            y_line = logical_line
             for x in range(start, end):
                 edges.append(RectEdge(RectCell(x, y_line - 1), RectCell(x, y_line)))
+                self._log_wall_edge_validation(segment, x, y_line, axis="z")
         else:
-            x_line = round(float(segment.line))
+            x_line = logical_line
             for y in range(start, end):
                 edges.append(RectEdge(RectCell(x_line - 1, y), RectCell(x_line, y)))
+                self._log_wall_edge_validation(segment, y, x_line, axis="x")
         return edges
+
+    def _resolve_logical_grid_line(self, line_value: float) -> int:
+        nearest_int = int(round(line_value))
+        if abs(line_value - nearest_int) <= 0.26:
+            return nearest_int
+        return int(math.floor(line_value + 1e-6))
+
+    def _log_wall_edge_validation(self, segment: WallSegment, index_value: int, line_value: int, *, axis: str) -> None:
+        if os.getenv("SILLYRPG_GRID_NAV_DEBUG", "").strip().lower() not in {"1", "true", "yes", "on"}:
+            return
+        if segment.orientation == "y":
+            print(
+                "[GridValidation][WallEdge]"
+                f" orientation=y side={segment.side} line={float(segment.line):.3f}"
+                f" edge=({line_value - 1},{index_value})<->({line_value},{index_value})"
+                f" edgeBoundaryX={float(line_value):.2f}"
+            )
+            return
+        print(
+            "[GridValidation][WallEdge]"
+            f" orientation=x side={segment.side} line={float(segment.line):.3f}"
+            f" edge=({index_value},{line_value - 1})<->({index_value},{line_value})"
+            f" edgeBoundaryZ={float(line_value):.2f}"
+        )

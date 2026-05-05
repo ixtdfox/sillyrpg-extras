@@ -13,6 +13,8 @@ PREVIEW_MATERIAL_NAME = "GameRectGridPreview_Cyan"
 
 class GameRectGridPreviewService:
     def refresh_preview(self, scene: bpy.types.Scene, props) -> bpy.types.Object | None:
+        # This preview is drawn in Blender XY (visual authoring space).
+        # Exported game navigation uses GameGridCoordinateMapper to convert XY -> Babylon XZ.
         self.remove_preview(scene)
         if not bool(getattr(props, "game_rect_grid_preview_enabled", False)):
             return None
@@ -46,6 +48,7 @@ class GameRectGridPreviewService:
         obj["grid_contract"] = "sillyrpg.grid_navigation.v3"
         obj["grid_type"] = "rect"
         obj["tile_size_m"] = float(WORLD_TILE_SIZE_M)
+        obj["preview_space"] = "blender_xy"
         obj.hide_render = True
 
         collection = ensure_collection(scene, PREVIEW_COLLECTION_NAME, delete_old=False)
