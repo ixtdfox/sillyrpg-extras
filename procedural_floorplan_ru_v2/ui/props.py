@@ -77,6 +77,60 @@ DEFAULTS = {
     "GAME_RECT_GRID_PREVIEW_ENABLED": False,
     "GAME_RECT_GRID_PREVIEW_RADIUS_TILES": 24,
     "GAME_RECT_GRID_PREVIEW_Y_OFFSET": 0.03,
+    "TERRAIN_ENABLED": False,
+    "TERRAIN_ENVIRONMENT_TYPE": "city",
+    "TERRAIN_GENERATION_MODE": "procedural_city",
+    "TERRAIN_MASK_PATH": "",
+    "TERRAIN_COLLECTION_NAME": "GeneratedTerrainScene",
+    "TERRAIN_DELETE_OLD": True,
+    "TERRAIN_PIXEL_SIZE_M": 1.0,
+    "TERRAIN_DOWNSAMPLE": 1,
+    "TERRAIN_SEED": 12345,
+    "TERRAIN_CITY_WIDTH_BLOCKS": 6,
+    "TERRAIN_CITY_DEPTH_BLOCKS": 5,
+    "TERRAIN_BLOCK_SIZE_TILES": 18,
+    "TERRAIN_ROAD_WIDTH_TILES": 3,
+    "TERRAIN_SIDEWALK_WIDTH_TILES": 1,
+    "TERRAIN_BLOCK_INNER_MARGIN_TILES": 1,
+    "TERRAIN_PARCEL_GAP_TILES": 1,
+    "TERRAIN_MIN_BUILDING_WIDTH_TILES": 5,
+    "TERRAIN_MIN_BUILDING_DEPTH_TILES": 5,
+    "TERRAIN_BLOCK_SIZE_M": 18.0,
+    "TERRAIN_ROAD_WIDTH_M": 4.0,
+    "TERRAIN_SIDEWALK_WIDTH_M": 2.0,
+    "TERRAIN_BUILDING_MAX_STORIES": 4,
+    "TERRAIN_BUILDING_MIN_STORIES": 1,
+    "TERRAIN_BUILDING_DENSITY": 0.8,
+    "TERRAIN_ZONE_LAYOUT": "suburb_residential",
+    "TERRAIN_INCLUDE_CARS": True,
+    "TERRAIN_CAR_DENSITY": 0.35,
+    "TERRAIN_INCLUDE_TREES": True,
+    "TERRAIN_TREE_DENSITY": 0.65,
+    "TERRAIN_INCLUDE_STREET_FURNITURE": True,
+    "TERRAIN_INCLUDE_TRAFFIC_LIGHTS": True,
+    "TERRAIN_INCLUDE_GROUND": True,
+    "TERRAIN_BPY_CITY_ASSETS_ROOT": "/home/tony/pets/bpy-city/assets",
+    "TERRAIN_USE_MULTIPROCESSING": True,
+    "TERRAIN_WORKER_COUNT": 0,
+    "TERRAIN_AVOID_BUILDING_OVERLAPS": True,
+    "TERRAIN_ALLOW_RELOCATE_BUILDINGS": True,
+    "TERRAIN_BUILDING_SPACING_TILES": 0.25,
+    "TERRAIN_KEEP_REJECTED_BUILDINGS": False,
+    "TERRAIN_MIN_BUILDING_AREA_PX": 12,
+    "TERRAIN_ROAD_HEIGHT_OFFSET": 0.0,
+    "TERRAIN_SIDEWALK_HEIGHT_OFFSET": 0.04,
+    "TERRAIN_CURB_HEIGHT": 0.12,
+    "TERRAIN_CURB_WIDTH": 0.18,
+    "TERRAIN_GENERATE_CROSSWALKS": True,
+    "TERRAIN_CROSSWALK_SPACING_M": 0.45,
+    "TERRAIN_CROSSWALK_WIDTH_M": 2.5,
+    "TERRAIN_GENERATE_DEBUG_MARKERS": False,
+    "TERRAIN_ROAD_TEXTURE_PATH": "",
+    "TERRAIN_SIDEWALK_TEXTURE_PATH": "",
+    "TERRAIN_CURB_TEXTURE_PATH": "",
+    "TERRAIN_GRASS_TEXTURE_PATH": "",
+    "TERRAIN_GENERATION_STATUS": "Idle",
+    "TERRAIN_GENERATION_PROGRESS": 0.0,
 }
 
 SHAPE_ITEMS = [
@@ -109,6 +163,22 @@ VERTICAL_PROFILE_ITEMS = [
 STAIR_MODE_ITEMS = [
     ("internal", "Внутренняя", "Генерировать лестницы внутри здания по текущей логике"),
     ("external", "Внешняя", "Генерировать наружную пожарную лестницу вдоль фасада"),
+]
+
+TERRAIN_ENVIRONMENT_ITEMS = [
+    ("city", "City", "Городская сцена"),
+]
+
+TERRAIN_GENERATION_MODE_ITEMS = [
+    ("procedural_city", "Procedural city", "Процедурный генератор города"),
+    ("image_mask", "Image mask / legacy", "Генерация по image mask старого типа"),
+]
+
+TERRAIN_ZONE_LAYOUT_ITEMS = [
+    ("suburb_residential", "Suburb residential", "Низкоэтажный жилой район"),
+    ("mixed_city", "Mixed city", "Смешанная застройка"),
+    ("dense_city", "Dense city", "Плотная городская сетка"),
+    ("industrial_edge", "Industrial edge", "Край города с индустриальной кромкой"),
 ]
 
 
@@ -499,6 +569,60 @@ def apply_defaults_to_props(props) -> None:
     props.game_rect_grid_preview_enabled = DEFAULTS["GAME_RECT_GRID_PREVIEW_ENABLED"]
     props.game_rect_grid_preview_radius_tiles = DEFAULTS["GAME_RECT_GRID_PREVIEW_RADIUS_TILES"]
     props.game_rect_grid_preview_y_offset = DEFAULTS["GAME_RECT_GRID_PREVIEW_Y_OFFSET"]
+    props.terrain_enabled = DEFAULTS["TERRAIN_ENABLED"]
+    props.terrain_environment_type = DEFAULTS["TERRAIN_ENVIRONMENT_TYPE"]
+    props.terrain_generation_mode = DEFAULTS["TERRAIN_GENERATION_MODE"]
+    props.terrain_mask_path = DEFAULTS["TERRAIN_MASK_PATH"]
+    props.terrain_collection_name = DEFAULTS["TERRAIN_COLLECTION_NAME"]
+    props.terrain_delete_old = DEFAULTS["TERRAIN_DELETE_OLD"]
+    props.terrain_pixel_size_m = DEFAULTS["TERRAIN_PIXEL_SIZE_M"]
+    props.terrain_downsample = DEFAULTS["TERRAIN_DOWNSAMPLE"]
+    props.terrain_seed = DEFAULTS["TERRAIN_SEED"]
+    props.terrain_city_width_blocks = DEFAULTS["TERRAIN_CITY_WIDTH_BLOCKS"]
+    props.terrain_city_depth_blocks = DEFAULTS["TERRAIN_CITY_DEPTH_BLOCKS"]
+    props.terrain_block_size_tiles = DEFAULTS["TERRAIN_BLOCK_SIZE_TILES"]
+    props.terrain_road_width_tiles = DEFAULTS["TERRAIN_ROAD_WIDTH_TILES"]
+    props.terrain_sidewalk_width_tiles = DEFAULTS["TERRAIN_SIDEWALK_WIDTH_TILES"]
+    props.terrain_block_inner_margin_tiles = DEFAULTS["TERRAIN_BLOCK_INNER_MARGIN_TILES"]
+    props.terrain_parcel_gap_tiles = DEFAULTS["TERRAIN_PARCEL_GAP_TILES"]
+    props.terrain_min_building_width_tiles = DEFAULTS["TERRAIN_MIN_BUILDING_WIDTH_TILES"]
+    props.terrain_min_building_depth_tiles = DEFAULTS["TERRAIN_MIN_BUILDING_DEPTH_TILES"]
+    props.terrain_block_size_m = DEFAULTS["TERRAIN_BLOCK_SIZE_M"]
+    props.terrain_road_width_m = DEFAULTS["TERRAIN_ROAD_WIDTH_M"]
+    props.terrain_sidewalk_width_m = DEFAULTS["TERRAIN_SIDEWALK_WIDTH_M"]
+    props.terrain_building_max_stories = DEFAULTS["TERRAIN_BUILDING_MAX_STORIES"]
+    props.terrain_building_min_stories = DEFAULTS["TERRAIN_BUILDING_MIN_STORIES"]
+    props.terrain_building_density = DEFAULTS["TERRAIN_BUILDING_DENSITY"]
+    props.terrain_zone_layout = DEFAULTS["TERRAIN_ZONE_LAYOUT"]
+    props.terrain_include_cars = DEFAULTS["TERRAIN_INCLUDE_CARS"]
+    props.terrain_car_density = DEFAULTS["TERRAIN_CAR_DENSITY"]
+    props.terrain_include_trees = DEFAULTS["TERRAIN_INCLUDE_TREES"]
+    props.terrain_tree_density = DEFAULTS["TERRAIN_TREE_DENSITY"]
+    props.terrain_include_street_furniture = DEFAULTS["TERRAIN_INCLUDE_STREET_FURNITURE"]
+    props.terrain_include_traffic_lights = DEFAULTS["TERRAIN_INCLUDE_TRAFFIC_LIGHTS"]
+    props.terrain_include_ground = DEFAULTS["TERRAIN_INCLUDE_GROUND"]
+    props.terrain_bpy_city_assets_root = DEFAULTS["TERRAIN_BPY_CITY_ASSETS_ROOT"]
+    props.terrain_use_multiprocessing = DEFAULTS["TERRAIN_USE_MULTIPROCESSING"]
+    props.terrain_worker_count = DEFAULTS["TERRAIN_WORKER_COUNT"]
+    props.terrain_avoid_building_overlaps = DEFAULTS["TERRAIN_AVOID_BUILDING_OVERLAPS"]
+    props.terrain_allow_relocate_buildings = DEFAULTS["TERRAIN_ALLOW_RELOCATE_BUILDINGS"]
+    props.terrain_building_spacing_tiles = DEFAULTS["TERRAIN_BUILDING_SPACING_TILES"]
+    props.terrain_keep_rejected_buildings = DEFAULTS["TERRAIN_KEEP_REJECTED_BUILDINGS"]
+    props.terrain_min_building_area_px = DEFAULTS["TERRAIN_MIN_BUILDING_AREA_PX"]
+    props.terrain_road_height_offset = DEFAULTS["TERRAIN_ROAD_HEIGHT_OFFSET"]
+    props.terrain_sidewalk_height_offset = DEFAULTS["TERRAIN_SIDEWALK_HEIGHT_OFFSET"]
+    props.terrain_curb_height = DEFAULTS["TERRAIN_CURB_HEIGHT"]
+    props.terrain_curb_width = DEFAULTS["TERRAIN_CURB_WIDTH"]
+    props.terrain_generate_crosswalks = DEFAULTS["TERRAIN_GENERATE_CROSSWALKS"]
+    props.terrain_crosswalk_spacing_m = DEFAULTS["TERRAIN_CROSSWALK_SPACING_M"]
+    props.terrain_crosswalk_width_m = DEFAULTS["TERRAIN_CROSSWALK_WIDTH_M"]
+    props.terrain_generate_debug_markers = DEFAULTS["TERRAIN_GENERATE_DEBUG_MARKERS"]
+    props.terrain_road_texture_path = DEFAULTS["TERRAIN_ROAD_TEXTURE_PATH"]
+    props.terrain_sidewalk_texture_path = DEFAULTS["TERRAIN_SIDEWALK_TEXTURE_PATH"]
+    props.terrain_curb_texture_path = DEFAULTS["TERRAIN_CURB_TEXTURE_PATH"]
+    props.terrain_grass_texture_path = DEFAULTS["TERRAIN_GRASS_TEXTURE_PATH"]
+    props.terrain_generation_status = DEFAULTS["TERRAIN_GENERATION_STATUS"]
+    props.terrain_generation_progress = DEFAULTS["TERRAIN_GENERATION_PROGRESS"]
     props.atlas_manifest_json = ""
     props.atlas_sync_lock = False
     props.wall_sync_lock = False
@@ -564,6 +688,323 @@ class FloorplanV2Settings(bpy.types.PropertyGroup):
         max=10.0,
         precision=3,
         update=_on_game_rect_grid_preview_enabled_changed,
+    )
+    terrain_enabled: BoolProperty(
+        name="Terrain enabled",
+        description="Включает terrain scene generator для procedural city и legacy image mask",
+        default=DEFAULTS["TERRAIN_ENABLED"],
+    )
+    terrain_environment_type: EnumProperty(
+        name="Environment type",
+        description="Тип окружения terrain generator",
+        items=TERRAIN_ENVIRONMENT_ITEMS,
+        default=DEFAULTS["TERRAIN_ENVIRONMENT_TYPE"],
+    )
+    terrain_generation_mode: EnumProperty(
+        name="Generation mode",
+        description="Основной режим terrain-сцены: procedural city или legacy image mask",
+        items=TERRAIN_GENERATION_MODE_ITEMS,
+        default=DEFAULTS["TERRAIN_GENERATION_MODE"],
+    )
+    terrain_mask_path: StringProperty(
+        name="Mask path",
+        description="PNG/JPG image mask с разметкой зон",
+        default=DEFAULTS["TERRAIN_MASK_PATH"],
+        subtype="FILE_PATH",
+    )
+    terrain_collection_name: StringProperty(
+        name="Terrain collection",
+        description="Корневая коллекция для terrain scene",
+        default=DEFAULTS["TERRAIN_COLLECTION_NAME"],
+    )
+    terrain_delete_old: BoolProperty(
+        name="Удалять старую scene",
+        description="Перед генерацией удалять старую terrain scene с тем же именем",
+        default=DEFAULTS["TERRAIN_DELETE_OLD"],
+    )
+    terrain_pixel_size_m: FloatProperty(
+        name="Метров на пиксель",
+        description="Сколько метров Blender соответствует одному пикселю mask",
+        default=DEFAULTS["TERRAIN_PIXEL_SIZE_M"],
+        min=0.01,
+        soft_max=20.0,
+    )
+    terrain_downsample: IntProperty(
+        name="Downsample",
+        description="Читать каждый N-й пиксель для больших карт",
+        default=DEFAULTS["TERRAIN_DOWNSAMPLE"],
+        min=1,
+        soft_max=8,
+    )
+    terrain_seed: IntProperty(
+        name="Terrain seed",
+        description="Seed вариативности terrain scene",
+        default=DEFAULTS["TERRAIN_SEED"],
+        min=0,
+    )
+    terrain_city_width_blocks: IntProperty(
+        name="Width blocks",
+        description="Количество кварталов по X",
+        default=DEFAULTS["TERRAIN_CITY_WIDTH_BLOCKS"],
+        min=1,
+        soft_max=24,
+    )
+    terrain_city_depth_blocks: IntProperty(
+        name="Depth blocks",
+        description="Количество кварталов по Y",
+        default=DEFAULTS["TERRAIN_CITY_DEPTH_BLOCKS"],
+        min=1,
+        soft_max=24,
+    )
+    terrain_block_size_tiles: IntProperty(
+        name="Block size (tiles)",
+        description="Размер блока между дорогами в игровых tile-клетках",
+        default=DEFAULTS["TERRAIN_BLOCK_SIZE_TILES"],
+        min=8,
+        soft_max=60,
+    )
+    terrain_road_width_tiles: IntProperty(
+        name="Road width (tiles)",
+        description="Ширина дороги в игровых tile-клетках",
+        default=DEFAULTS["TERRAIN_ROAD_WIDTH_TILES"],
+        min=1,
+        soft_max=12,
+    )
+    terrain_sidewalk_width_tiles: IntProperty(
+        name="Sidewalk width (tiles)",
+        description="Ширина тротуара вокруг блока в игровых tile-клетках",
+        default=DEFAULTS["TERRAIN_SIDEWALK_WIDTH_TILES"],
+        min=0,
+        soft_max=8,
+    )
+    terrain_block_inner_margin_tiles: IntProperty(
+        name="Inner margin (tiles)",
+        description="Отступ от внутренней кромки блока до parcel area в tile-клетках",
+        default=DEFAULTS["TERRAIN_BLOCK_INNER_MARGIN_TILES"],
+        min=0,
+        soft_max=6,
+    )
+    terrain_parcel_gap_tiles: IntProperty(
+        name="Parcel gap (tiles)",
+        description="Промежуток между parcel bounds в tile-клетках",
+        default=DEFAULTS["TERRAIN_PARCEL_GAP_TILES"],
+        min=0,
+        soft_max=4,
+    )
+    terrain_min_building_width_tiles: IntProperty(
+        name="Min building width (tiles)",
+        description="Минимальная ширина parcel под здание в игровых tile-клетках",
+        default=DEFAULTS["TERRAIN_MIN_BUILDING_WIDTH_TILES"],
+        min=3,
+        soft_max=20,
+    )
+    terrain_min_building_depth_tiles: IntProperty(
+        name="Min building depth (tiles)",
+        description="Минимальная глубина parcel под здание в игровых tile-клетках",
+        default=DEFAULTS["TERRAIN_MIN_BUILDING_DEPTH_TILES"],
+        min=3,
+        soft_max=20,
+    )
+    terrain_block_size_m: FloatProperty(
+        name="Block size",
+        description="Размер одного городского блока между дорогами",
+        default=DEFAULTS["TERRAIN_BLOCK_SIZE_M"],
+        min=1.0,
+        soft_max=60.0,
+    )
+    terrain_road_width_m: FloatProperty(
+        name="Road width",
+        description="Ширина дороги",
+        default=DEFAULTS["TERRAIN_ROAD_WIDTH_M"],
+        min=0.5,
+        soft_max=20.0,
+    )
+    terrain_sidewalk_width_m: FloatProperty(
+        name="Sidewalk width",
+        description="Ширина тротуара вокруг блока",
+        default=DEFAULTS["TERRAIN_SIDEWALK_WIDTH_M"],
+        min=0.0,
+        soft_max=10.0,
+    )
+    terrain_building_max_stories: IntProperty(
+        name="Макс. этажей",
+        description="Максимальная этажность зданий terrain scene",
+        default=DEFAULTS["TERRAIN_BUILDING_MAX_STORIES"],
+        min=1,
+        soft_max=12,
+    )
+    terrain_building_min_stories: IntProperty(
+        name="Мин. этажей",
+        description="Минимальная этажность зданий terrain scene",
+        default=DEFAULTS["TERRAIN_BUILDING_MIN_STORIES"],
+        min=1,
+        soft_max=12,
+    )
+    terrain_building_density: FloatProperty(
+        name="Плотность зданий",
+        description="Доля красных building-regions, которые реально станут зданиями",
+        default=DEFAULTS["TERRAIN_BUILDING_DENSITY"],
+        min=0.0,
+        max=1.0,
+        subtype="FACTOR",
+    )
+    terrain_zone_layout: EnumProperty(
+        name="Zone layout",
+        description="Паттерн parcel subdivision и тип района",
+        items=TERRAIN_ZONE_LAYOUT_ITEMS,
+        default=DEFAULTS["TERRAIN_ZONE_LAYOUT"],
+    )
+    terrain_include_cars: BoolProperty(
+        name="Include cars",
+        description="Размещать машины на дорогах",
+        default=DEFAULTS["TERRAIN_INCLUDE_CARS"],
+    )
+    terrain_car_density: FloatProperty(
+        name="Car density",
+        description="Плотность машин вдоль дорог",
+        default=DEFAULTS["TERRAIN_CAR_DENSITY"],
+        min=0.0,
+        max=1.0,
+        subtype="FACTOR",
+    )
+    terrain_include_trees: BoolProperty(
+        name="Include trees",
+        description="Размещать деревья вдоль тротуаров и блоков",
+        default=DEFAULTS["TERRAIN_INCLUDE_TREES"],
+    )
+    terrain_tree_density: FloatProperty(
+        name="Tree density",
+        description="Плотность деревьев вдоль блоков",
+        default=DEFAULTS["TERRAIN_TREE_DENSITY"],
+        min=0.0,
+        max=1.0,
+        subtype="FACTOR",
+    )
+    terrain_include_street_furniture: BoolProperty(
+        name="Include street furniture",
+        description="Размещать скамейки, уличные предметы и мелкий декор",
+        default=DEFAULTS["TERRAIN_INCLUDE_STREET_FURNITURE"],
+    )
+    terrain_include_traffic_lights: BoolProperty(
+        name="Include traffic lights",
+        description="Размещать traffic lights на перекрёстках",
+        default=DEFAULTS["TERRAIN_INCLUDE_TRAFFIC_LIGHTS"],
+    )
+    terrain_include_ground: BoolProperty(
+        name="Include ground",
+        description="Создавать базовую ground/grass plane под районом",
+        default=DEFAULTS["TERRAIN_INCLUDE_GROUND"],
+    )
+    terrain_bpy_city_assets_root: StringProperty(
+        name="Assets root",
+        description="Корень ассетов для cars/trees/furniture/roads, совместимый с bpy-city assets layout",
+        default=DEFAULTS["TERRAIN_BPY_CITY_ASSETS_ROOT"],
+        subtype="DIR_PATH",
+    )
+    terrain_use_multiprocessing: BoolProperty(
+        name="Use multiprocessing planning",
+        description="Использовать multiprocessing только для city layout/planning математики; Blender objects всё равно создаются в main thread",
+        default=DEFAULTS["TERRAIN_USE_MULTIPROCESSING"],
+    )
+    terrain_worker_count: IntProperty(
+        name="Planning workers",
+        description="Количество worker-процессов для city planning. 0 = auto",
+        default=DEFAULTS["TERRAIN_WORKER_COUNT"],
+        min=0,
+        soft_max=32,
+    )
+    terrain_avoid_building_overlaps: BoolProperty(
+        name="Avoid building overlaps",
+        description="Проверять world bbox зданий и не допускать пересечения между зданиями и forbidden zones",
+        default=DEFAULTS["TERRAIN_AVOID_BUILDING_OVERLAPS"],
+    )
+    terrain_allow_relocate_buildings: BoolProperty(
+        name="Allow relocate buildings",
+        description="Если здание не помещается в исходный parcel, пробовать перенести его в другой свободный parcel",
+        default=DEFAULTS["TERRAIN_ALLOW_RELOCATE_BUILDINGS"],
+    )
+    terrain_building_spacing_tiles: FloatProperty(
+        name="Building spacing (tiles)",
+        description="Минимальный зазор между bbox зданий в игровых tile-клетках",
+        default=DEFAULTS["TERRAIN_BUILDING_SPACING_TILES"],
+        min=0.0,
+        soft_max=2.0,
+    )
+    terrain_keep_rejected_buildings: BoolProperty(
+        name="Keep rejected buildings",
+        description="Не удалять rejected buildings, а переносить их в debug collection для диагностики",
+        default=DEFAULTS["TERRAIN_KEEP_REJECTED_BUILDINGS"],
+    )
+    terrain_min_building_area_px: IntProperty(
+        name="Мин. area, px",
+        description="Игнорировать слишком маленькие building-regions",
+        default=DEFAULTS["TERRAIN_MIN_BUILDING_AREA_PX"],
+        min=1,
+    )
+    terrain_road_height_offset: FloatProperty(
+        name="Road Z offset",
+        description="Высота дорожного покрытия",
+        default=DEFAULTS["TERRAIN_ROAD_HEIGHT_OFFSET"],
+        soft_min=-1.0,
+        soft_max=1.0,
+    )
+    terrain_sidewalk_height_offset: FloatProperty(
+        name="Sidewalk Z offset",
+        description="Высота тротуаров",
+        default=DEFAULTS["TERRAIN_SIDEWALK_HEIGHT_OFFSET"],
+        min=0.0,
+        soft_max=1.0,
+    )
+    terrain_curb_height: FloatProperty(
+        name="Curb height",
+        description="Высота бордюра",
+        default=DEFAULTS["TERRAIN_CURB_HEIGHT"],
+        min=0.0,
+        soft_max=1.0,
+    )
+    terrain_curb_width: FloatProperty(
+        name="Curb width",
+        description="Ширина бордюра",
+        default=DEFAULTS["TERRAIN_CURB_WIDTH"],
+        min=0.01,
+        soft_max=1.0,
+    )
+    terrain_generate_crosswalks: BoolProperty(
+        name="Generate crosswalks",
+        description="Создавать переходы по white-pixels",
+        default=DEFAULTS["TERRAIN_GENERATE_CROSSWALKS"],
+    )
+    terrain_crosswalk_spacing_m: FloatProperty(
+        name="Crosswalk spacing",
+        description="Задел на шаг полос перехода",
+        default=DEFAULTS["TERRAIN_CROSSWALK_SPACING_M"],
+        min=0.05,
+        soft_max=5.0,
+    )
+    terrain_crosswalk_width_m: FloatProperty(
+        name="Crosswalk width",
+        description="Ширина перехода в метрах",
+        default=DEFAULTS["TERRAIN_CROSSWALK_WIDTH_M"],
+        min=0.1,
+        soft_max=10.0,
+    )
+    terrain_generate_debug_markers: BoolProperty(
+        name="Debug markers",
+        description="Создавать debug empties по центрам building-regions",
+        default=DEFAULTS["TERRAIN_GENERATE_DEBUG_MARKERS"],
+    )
+    terrain_generation_status: StringProperty(
+        name="Terrain status",
+        description="Текущее состояние генерации terrain scene",
+        default=DEFAULTS["TERRAIN_GENERATION_STATUS"],
+    )
+    terrain_generation_progress: FloatProperty(
+        name="Terrain progress",
+        description="Прогресс terrain scene generation",
+        default=DEFAULTS["TERRAIN_GENERATION_PROGRESS"],
+        min=0.0,
+        max=100.0,
+        subtype="PERCENTAGE",
     )
     seed: IntProperty(name="Seed", description="Зерно генерации формы", default=DEFAULTS["SEED"], min=0)
     target_room_count: IntProperty(name="Количество комнат", description="Влияет на размер и сложность footprint", default=DEFAULTS["TARGET_ROOM_COUNT"], min=1, soft_max=30)
@@ -1006,6 +1447,30 @@ class FloorplanV2Settings(bpy.types.PropertyGroup):
         default=DEFAULTS["RAILING_RAIL_COUNT"],
         min=1,
         soft_max=6,
+    )
+    terrain_road_texture_path: StringProperty(
+        name="Road texture",
+        description="Необязательный texture path для asphalt",
+        default=DEFAULTS["TERRAIN_ROAD_TEXTURE_PATH"],
+        subtype="FILE_PATH",
+    )
+    terrain_sidewalk_texture_path: StringProperty(
+        name="Sidewalk texture",
+        description="Необязательный texture path для sidewalk",
+        default=DEFAULTS["TERRAIN_SIDEWALK_TEXTURE_PATH"],
+        subtype="FILE_PATH",
+    )
+    terrain_curb_texture_path: StringProperty(
+        name="Curb texture",
+        description="Необязательный texture path для curb",
+        default=DEFAULTS["TERRAIN_CURB_TEXTURE_PATH"],
+        subtype="FILE_PATH",
+    )
+    terrain_grass_texture_path: StringProperty(
+        name="Grass texture",
+        description="Необязательный texture path для grass",
+        default=DEFAULTS["TERRAIN_GRASS_TEXTURE_PATH"],
+        subtype="FILE_PATH",
     )
 
     atlas_manifest_json: StringProperty(name="Atlas JSON", default="", options={"HIDDEN"})

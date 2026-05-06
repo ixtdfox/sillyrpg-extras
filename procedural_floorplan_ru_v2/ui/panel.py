@@ -238,7 +238,118 @@ class FLOORPLAN_V2_PT_panel(bpy.types.Panel):
         grid.prop(props, "atlas_tile_height_m")
 
 
-classes = (FLOORPLAN_V2_PT_panel,)
+class FLOORPLAN_V2_PT_procedural_city_panel(bpy.types.Panel):
+    """Отдельная вкладка procedural city / terrain генератора."""
+
+    bl_label = "Procedural City"
+    bl_idname = "FLOORPLAN_V2_PT_procedural_city_panel_ru"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = "Procedural City"
+
+    def draw(self, context):
+        layout = self.layout
+        props = context.scene.floorplan_ru_v2_settings
+
+        box = layout.box()
+        box.label(text="Procedural City")
+        box.prop(props, "terrain_enabled")
+        box.prop(props, "terrain_environment_type")
+        box.prop(props, "terrain_generation_mode")
+        box.prop(props, "terrain_collection_name")
+        box.prop(props, "terrain_delete_old")
+
+        settings_box = layout.box()
+        settings_box.label(text="Scene Settings")
+        col = settings_box.column(align=True)
+        col.enabled = props.terrain_enabled
+        col.label(text=f"Status: {props.terrain_generation_status}")
+        col.prop(props, "terrain_generation_progress", slider=True, text="Progress")
+        col.prop(props, "terrain_seed")
+        col.prop(props, "terrain_building_min_stories")
+        col.prop(props, "terrain_building_max_stories")
+        col.prop(props, "terrain_building_density", slider=True)
+        col.prop(props, "terrain_generate_debug_markers")
+
+        if props.terrain_generation_mode == "procedural_city":
+            city_box = layout.box()
+            city_box.label(text="Procedural City")
+            col = city_box.column(align=True)
+            col.enabled = props.terrain_enabled
+            col.prop(props, "terrain_city_width_blocks")
+            col.prop(props, "terrain_city_depth_blocks")
+            col.prop(props, "terrain_block_size_tiles")
+            col.prop(props, "terrain_road_width_tiles")
+            col.prop(props, "terrain_sidewalk_width_tiles")
+            col.prop(props, "terrain_block_inner_margin_tiles")
+            col.prop(props, "terrain_parcel_gap_tiles")
+            col.prop(props, "terrain_min_building_width_tiles")
+            col.prop(props, "terrain_min_building_depth_tiles")
+            col.prop(props, "terrain_zone_layout")
+            col.prop(props, "terrain_include_ground")
+            col.prop(props, "terrain_use_multiprocessing")
+            sub = col.column(align=True)
+            sub.enabled = props.terrain_enabled and props.terrain_use_multiprocessing
+            sub.prop(props, "terrain_worker_count")
+            col.prop(props, "terrain_avoid_building_overlaps")
+            sub = col.column(align=True)
+            sub.enabled = props.terrain_enabled and props.terrain_avoid_building_overlaps
+            sub.prop(props, "terrain_allow_relocate_buildings")
+            sub.prop(props, "terrain_building_spacing_tiles")
+            sub.prop(props, "terrain_keep_rejected_buildings")
+            col.prop(props, "terrain_include_cars")
+            sub = col.column(align=True)
+            sub.enabled = props.terrain_enabled and props.terrain_include_cars
+            sub.prop(props, "terrain_car_density", slider=True)
+            col.prop(props, "terrain_include_trees")
+            sub = col.column(align=True)
+            sub.enabled = props.terrain_enabled and props.terrain_include_trees
+            sub.prop(props, "terrain_tree_density", slider=True)
+            col.prop(props, "terrain_include_street_furniture")
+            col.prop(props, "terrain_include_traffic_lights")
+
+            asset_box = layout.box()
+            asset_box.label(text="Assets")
+            col = asset_box.column(align=True)
+            col.enabled = props.terrain_enabled
+            col.prop(props, "terrain_bpy_city_assets_root")
+            asset_box.label(text="Tile-based layout: 1 city tile = 1 game tile.", icon="INFO")
+            asset_box.label(text="Missing assets root is allowed: roads and buildings still generate.", icon="INFO")
+        else:
+            mask_box = layout.box()
+            mask_box.label(text="Image Mask / Legacy")
+            col = mask_box.column(align=True)
+            col.enabled = props.terrain_enabled
+            col.prop(props, "terrain_mask_path")
+            col.prop(props, "terrain_pixel_size_m")
+            col.prop(props, "terrain_downsample")
+            col.prop(props, "terrain_min_building_area_px")
+            col.prop(props, "terrain_generate_crosswalks")
+            col.prop(props, "terrain_crosswalk_spacing_m")
+            col.prop(props, "terrain_crosswalk_width_m")
+            mask_box.label(text="Mask colors: red=buildings, dark gray=roads,", icon="INFO")
+            mask_box.label(text="light gray=sidewalks, green=grass, white=crosswalks, black=empty.", icon="INFO")
+
+        texture_box = layout.box()
+        texture_box.label(text="Terrain Materials")
+        col = texture_box.column(align=True)
+        col.enabled = props.terrain_enabled
+        col.prop(props, "terrain_road_texture_path")
+        col.prop(props, "terrain_sidewalk_texture_path")
+        col.prop(props, "terrain_curb_texture_path")
+        col.prop(props, "terrain_grass_texture_path")
+        texture_box.label(text="CC0 sources: Poly Haven, ambientCG", icon="INFO")
+
+        actions = layout.box()
+        actions.label(text="Actions")
+        row = actions.row(align=True)
+        row.operator("floorplan_ru_v2.generate_terrain_scene", icon="OUTLINER_COLLECTION")
+        row.operator("floorplan_ru_v2.finalize_terrain_buildings", icon="MOD_DECIM")
+        actions.operator("floorplan_ru_v2.clear_terrain_scene", icon="TRASH")
+        actions.operator("floorplan_ru_v2.create_terrain_mask_legend", icon="IMAGE_DATA")
+
+
+classes = (FLOORPLAN_V2_PT_panel, FLOORPLAN_V2_PT_procedural_city_panel)
 
 
 def register():

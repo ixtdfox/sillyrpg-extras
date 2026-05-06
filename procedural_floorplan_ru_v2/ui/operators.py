@@ -9,12 +9,22 @@ from mathutils import Matrix, Vector
 from .. import atlas
 from ..building_stories_manager import BuildingStoriesManager
 from ..building_manager import GenerationContext, settings_from_props
+from ..common.progress import GenerationProgress
 from ..common.utils import ensure_collection, focus_generated_objects
 from ..game_grid import GAME_TILE_SIZE_M, snap_value_to_game_grid, snap_world_point_to_nearest_rect_cell_center
 from ..navigation import ensure_building_root, regenerate_existing_stair_navigation, set_selected_stair_navigation_visibility, set_stair_navigation_visibility, validate_stair_navigation
 from ..metadata import NavigationMetadataExporter
 from ..optimization import GeneratedMeshOptimizer
 from ..preview import GameRectGridPreviewService
+from ..terrain import (
+    ProceduralCityGenerationError,
+    ProceduralCityGenerator,
+    TerrainSceneGenerationError,
+    TerrainSceneGenerator,
+    create_sample_mask_legend,
+    procedural_city_settings_from_props,
+    terrain_settings_from_props,
+)
 from .props import apply_defaults_to_props
 
 
@@ -201,6 +211,169 @@ class FLOORPLAN_V2_OT_optimize_generated_meshes(bpy.types.Operator):
         except Exception as exc:
             self.report({"ERROR"}, f"Не удалось оптимизировать меши: {exc}")
             return {"CANCELLED"}
+
+
+class FLOORPLAN_V2_OT_generate_terrain_scene(bpy.types.Operator):
+    """Генерирует terrain scene в выбранном режиме."""
+
+    bl_idname = "floorplan_ru_v2.generate_terrain_scene"
+    bl_label = "Generate terrain scene"
+    bl_description = "Создать procedural city или legacy image-mask terrain scene"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        props = context.scene.floorplan_ru_v2_settings
+        if not props.terrain_enabled:
+            self.report({"WARNING"}, "Включите Terrain enabled")
+            return {"CANCELLED"}
+        props.terrain_generation_status = "Preparing terrain scene..."
+        props.terrain_generation_progress = 0.0
+        progress = GenerationProgress(
+            wm=getattr(context, "window_manager", None),
+            total=100,
+            operator=self,
+            props=props,
+        )
+        progress.begin("Preparing terrain scene...", report=True)
+        mode = str(getattr(props, "terrain_generation_mode", "procedural_city"))
+        try:
+            if mode == "procedural_city":
+                city_settings = procedural_city_settings_from_props(props)
+                stats = ProceduralCityGenerator().generate(context, props, city_settings, progress=progress)
+                progress.update(100, "Done.")
+                if stats.asset_counts:
+                    self.report(
+                        {"INFO"},
+                        "Assets: cars=%d trees=%d tropicalTrees=%d bushes=%d benches=%d trafficLights=%d"
+                        % (
+                            stats.asset_counts.get("cars", 0),
+                            stats.asset_counts.get("trees", 0),
+                            stats.asset_counts.get("trees_tropical", 0),
+                            stats.asset_counts.get("bushes", 0),
+                            stats.asset_counts.get("benches", 0),
+                            stats.asset_counts.get("traffic_lights", 0),
+                        ),
+                    )
+                self.report(
+                    {"INFO"},
+                    "Props placed: cars=%d trees=%d streetFurniture=%d trafficLights=%d"
+                    % (
+                        stats.cars_created,
+                        stats.trees_created,
+                        stats.street_furniture_created,
+                        stats.traffic_lights_created,
+                    ),
+                )
+                for warning in stats.warnings[:4]:
+                    self.report({"WARNING"}, warning)
+                self.report(
+                    {"INFO"},
+                    f"Procedural city создан: buildings={stats.buildings_created}, blocks={stats.blocks_created}, parcels={stats.parcels_created}, props={stats.cars_created + stats.trees_created + stats.street_furniture_created + stats.traffic_lights_created}",
+                )
+                return {"FINISHED"}
+
+            terrain_settings = terrain_settings_from_props(props)
+            stats = TerrainSceneGenerator().generate(context, props, terrain_settings, progress=progress)
+            progress.update(100, "Done.")
+            self.report(
+                {"INFO"},
+                f"Legacy image-mask terrain создан: buildings={stats.buildings_created}, roads={stats.road_objects}, sidewalks={stats.sidewalk_objects}",
+            )
+            return {"FINISHED"}
+        except ProceduralCityGenerationError as exc:
+            progress.update(progress.current, f"Terrain generation failed: {exc}")
+            self.report({"ERROR"}, str(exc))
+            return {"CANCELLED"}
+        except TerrainSceneGenerationError as exc:
+            progress.update(progress.current, f"Terrain generation failed: {exc}")
+            self.report({"ERROR"}, str(exc))
+            return {"CANCELLED"}
+        except FileNotFoundError as exc:
+            progress.update(progress.current, f"Terrain generation failed: {exc}")
+            self.report({"ERROR"}, str(exc))
+            return {"CANCELLED"}
+        except Exception as exc:
+            progress.update(progress.current, f"Terrain generation failed: {exc}")
+            if mode == "procedural_city":
+                self.report({"ERROR"}, f"Ошибка procedural city generation: {exc}")
+            else:
+                self.report({"ERROR"}, f"Ошибка terrain generation: {exc}")
+            return {"CANCELLED"}
+        finally:
+            progress.end("" if "failed" in props.terrain_generation_status.lower() else "Done.")
+
+
+class FLOORPLAN_V2_OT_finalize_terrain_buildings(bpy.types.Operator):
+    """Оптимизирует только здания внутри terrain scene."""
+
+    bl_idname = "floorplan_ru_v2.finalize_terrain_buildings"
+    bl_label = "Finalize all buildings"
+    bl_description = "Оптимизировать и смержить здания внутри terrain scene"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        props = context.scene.floorplan_ru_v2_settings
+        root = bpy.data.collections.get(str(props.terrain_collection_name))
+        if root is None:
+            self.report({"WARNING"}, f"Terrain scene не найдена: {props.terrain_collection_name}")
+            return {"CANCELLED"}
+        buildings_root = root.children.get("buildings")
+        if buildings_root is None:
+            buildings_root = root.children.get("02_Buildings")
+        if buildings_root is None:
+            self.report({"WARNING"}, "В terrain scene нет коллекции buildings")
+            return {"CANCELLED"}
+
+        optimizer = GeneratedMeshOptimizer()
+        buildings_processed = 0
+        groups_optimized = 0
+        objects_removed = 0
+        for collection in buildings_root.children:
+            result = optimizer.optimize_collection(collection, selected_only=False)
+            buildings_processed += 1
+            groups_optimized += result.groups_optimized
+            objects_removed += result.objects_removed
+
+        self.report(
+            {"INFO"},
+            f"Finalize buildings: processed={buildings_processed}, groups={groups_optimized}, removed={objects_removed}",
+        )
+        return {"FINISHED"}
+
+
+class FLOORPLAN_V2_OT_clear_terrain_scene(bpy.types.Operator):
+    """Удаляет всю terrain scene collection без влияния на обычную генерацию."""
+
+    bl_idname = "floorplan_ru_v2.clear_terrain_scene"
+    bl_label = "Clear terrain scene"
+    bl_description = "Удалить terrain scene collection и её содержимое"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        props = context.scene.floorplan_ru_v2_settings
+        removed = ProceduralCityGenerator().clear(context.scene, str(props.terrain_collection_name))
+        if not removed:
+            self.report({"WARNING"}, f"Terrain scene не найдена: {props.terrain_collection_name}")
+            return {"CANCELLED"}
+        self.report({"INFO"}, f"Удалена terrain scene: {props.terrain_collection_name}")
+        return {"FINISHED"}
+
+
+class FLOORPLAN_V2_OT_create_terrain_mask_legend(bpy.types.Operator):
+    """Создаёт sample PNG legend для terrain mask."""
+
+    bl_idname = "floorplan_ru_v2.create_terrain_mask_legend"
+    bl_label = "Create sample mask legend"
+    bl_description = "Сгенерировать PNG-пример terrain mask во временную директорию"
+
+    def execute(self, context):
+        try:
+            path = create_sample_mask_legend()
+        except Exception as exc:
+            self.report({"ERROR"}, f"Не удалось создать mask legend: {exc}")
+            return {"CANCELLED"}
+        self.report({"INFO"}, f"Sample mask legend создан: {path}")
+        return {"FINISHED"}
 
 
 class FLOORPLAN_V2_OT_refresh_game_rect_grid_preview(bpy.types.Operator):
@@ -491,6 +664,10 @@ classes = (
     FLOORPLAN_V2_OT_atlas_save_manifest,
     FLOORPLAN_V2_OT_atlas_apply_existing,
     FLOORPLAN_V2_OT_optimize_generated_meshes,
+    FLOORPLAN_V2_OT_generate_terrain_scene,
+    FLOORPLAN_V2_OT_finalize_terrain_buildings,
+    FLOORPLAN_V2_OT_clear_terrain_scene,
+    FLOORPLAN_V2_OT_create_terrain_mask_legend,
     FLOORPLAN_V2_OT_refresh_game_rect_grid_preview,
     FLOORPLAN_V2_OT_remove_game_rect_grid_preview,
     FLOORPLAN_V2_OT_align_building_to_game_grid,
