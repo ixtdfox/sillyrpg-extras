@@ -18,6 +18,14 @@ class BuildingCandidate:
     house_scale: float
     min_room_side_m: float
     collection_name: str
+    footprint_width_tiles: int
+    footprint_depth_tiles: int
+    raw_width_m: float
+    raw_depth_m: float
+    placement_width_m: float
+    placement_depth_m: float
+    placement_margin_m: float
+    frontage_extra_m: float
     estimated_width_tiles: int
     estimated_depth_tiles: int
     estimated_width_m: float

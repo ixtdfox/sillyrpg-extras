@@ -42,6 +42,31 @@ def rect_contains(container: Rect, rect: Rect, epsilon: float = 1e-4) -> bool:
     )
 
 
+def rect_translate(rect: Rect, dx: float, dy: float) -> Rect:
+    return Rect(
+        rect.min_x + float(dx),
+        rect.min_y + float(dy),
+        rect.max_x + float(dx),
+        rect.max_y + float(dy),
+    )
+
+
+def clamp_rect_translation_into(container: Rect, rect: Rect, epsilon: float = 1e-4) -> tuple[float, float] | None:
+    if rect_width(rect) > rect_width(container) + epsilon or rect_depth(rect) > rect_depth(container) + epsilon:
+        return None
+    dx = 0.0
+    dy = 0.0
+    if rect.min_x < container.min_x:
+        dx = container.min_x - rect.min_x
+    elif rect.max_x > container.max_x:
+        dx = container.max_x - rect.max_x
+    if rect.min_y < container.min_y:
+        dy = container.min_y - rect.min_y
+    elif rect.max_y > container.max_y:
+        dy = container.max_y - rect.max_y
+    return float(dx), float(dy)
+
+
 def rect_from_parcel(parcel, inset_m: float = 0.0) -> Rect:
     return Rect(
         float(parcel.x) + inset_m,

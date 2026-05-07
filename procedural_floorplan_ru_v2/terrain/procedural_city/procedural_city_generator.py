@@ -117,15 +117,19 @@ class ProceduralCityGenerator:
         if asset_library.has_assets():
             _progress_set(progress, 90, "Placing trees and props", report=True)
             props_started = perf_counter()
-            prop_counts = place_city_props(
-                layout=layout,
-                settings=settings,
-                asset_library=asset_library,
-                collections=collections,
-                scene_id=settings.collection_name,
-                building_bounds=building_bounds,
-                prop_plan=prop_plan,
-            )
+            try:
+                prop_counts = place_city_props(
+                    layout=layout,
+                    settings=settings,
+                    asset_library=asset_library,
+                    collections=collections,
+                    scene_id=settings.collection_name,
+                    building_bounds=building_bounds,
+                    prop_plan=prop_plan,
+                )
+            except Exception as exc:
+                warnings.append(f"Prop placement failed: {exc}")
+                print(f"[ProceduralCity] WARNING: prop placement failed: {exc}")
             print(
                 f"[ProceduralCity][Perf] props: {perf_counter() - props_started:.2f}s "
                 f"linked_duplicates=True count={sum(prop_counts.values())}"

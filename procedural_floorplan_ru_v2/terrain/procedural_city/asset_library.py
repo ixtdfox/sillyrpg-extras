@@ -90,7 +90,10 @@ class ProceduralCityAssetLibrary:
 
     def load_asset(self, filepath: str) -> bpy.types.Object | None:
         if filepath in self.loaded_objects:
-            return self.loaded_objects[filepath]
+            cached = self.loaded_objects[filepath]
+            if _object_is_alive(cached):
+                return cached
+            self.loaded_objects.pop(filepath, None)
         filepath_obj = Path(filepath)
         if not filepath_obj.exists():
             self.import_failures[filepath] = "file_not_found"
@@ -103,11 +106,12 @@ class ProceduralCityAssetLibrary:
             self.import_failures[filepath] = str(exc)
             self.warnings.append(f"Asset import failed: {filepath_obj.name}: {exc}")
             return None
-        imported_all = [obj for obj in bpy.data.objects if obj.as_pointer() not in existing]
-        imported_meshes = [obj for obj in imported_all if obj.type == "MESH"]
+        bpy.context.view_layer.update()
+        imported_all = [obj for obj in bpy.data.objects if obj.as_pointer() not in existing and _object_is_alive(obj)]
+        imported_meshes = [obj for obj in imported_all if _object_is_alive(obj) and obj.type == "MESH"]
         if not imported_meshes:
             for obj in imported_all:
-                bpy.data.objects.remove(obj, do_unlink=True)
+                _safe_remove_object(obj)
             self.import_failures[filepath] = "no_mesh_objects"
             self.warnings.append(f"Asset import produced no mesh: {filepath_obj.name}")
             return None
@@ -115,16 +119,25 @@ class ProceduralCityAssetLibrary:
         if len(imported_meshes) > 1:
             bpy.ops.object.select_all(action="DESELECT")
             for obj in imported_meshes:
-                obj.select_set(True)
+                if _object_is_alive(obj):
+                    obj.select_set(True)
             bpy.context.view_layer.objects.active = main_obj
             bpy.ops.object.join()
+            bpy.context.view_layer.update()
             main_obj = bpy.context.view_layer.objects.active
         for obj in imported_all:
-            if obj == main_obj:
+            if not _object_is_alive(obj) or obj == main_obj:
                 continue
-            bpy.data.objects.remove(obj, do_unlink=True)
+            _safe_remove_object(obj)
+        if not _object_is_alive(main_obj):
+            self.import_failures[filepath] = "joined_object_removed"
+            self.warnings.append(f"Asset import lost joined mesh: {filepath_obj.name}")
+            return None
         for collection in list(main_obj.users_collection):
-            collection.objects.unlink(main_obj)
+            try:
+                collection.objects.unlink(main_obj)
+            except Exception:
+                continue
         self.hidden_collection.objects.link(main_obj)
         main_obj.hide_viewport = True
         main_obj.hide_render = True
@@ -181,3 +194,24 @@ class ProceduralCityAssetLibrary:
 
 def _asset_id_from_path(path: Path) -> str:
     return path.stem.strip().lower().replace(" ", "_")
+
+
+def _object_is_alive(obj) -> bool:
+    try:
+        name = obj.name
+        return bool(name) and name in bpy.data.objects
+    except ReferenceError:
+        return False
+    except RuntimeError:
+        return False
+
+
+def _safe_remove_object(obj) -> None:
+    if not _object_is_alive(obj):
+        return
+    try:
+        bpy.data.objects.remove(obj, do_unlink=True)
+    except ReferenceError:
+        return
+    except RuntimeError:
+        return
